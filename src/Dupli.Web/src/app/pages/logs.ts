@@ -1,6 +1,7 @@
 import { httpResource } from '@angular/common/http';
 import { Component, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { params } from '../core/api.service';
 import { Agent, LogEntry } from '../core/models';
 import { LogsTable, lookup } from '../shared/tables';
 
@@ -40,7 +41,7 @@ export class LogsPage {
   protected readonly agents = httpResource<Agent[]>(() => '/api/admin/agents');
   protected readonly logs = httpResource<LogEntry[]>(() => ({
     url: '/api/admin/logs',
-    params: { agentId: this.agentId(), level: this.level(), limit: 500 },
+    params: params({ agentId: this.agentId(), level: this.level(), limit: 500 }),
   }));
   protected readonly agentNames = computed(() => lookup(this.agents.value()));
 }

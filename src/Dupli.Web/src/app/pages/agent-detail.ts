@@ -2,7 +2,7 @@ import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { ApiService } from '../core/api.service';
+import { ApiService, params } from '../core/api.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import {
   Agent,
@@ -512,7 +512,7 @@ export class AgentDetailPage {
     this.tab() === 'logs'
       ? {
           url: '/api/admin/logs',
-          params: { agentId: this.id(), level: this.logLevel(), limit: 300 },
+          params: params({ agentId: this.id(), level: this.logLevel(), limit: 300 }),
         }
       : undefined,
   );

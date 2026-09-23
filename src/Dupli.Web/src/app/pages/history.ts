@@ -1,6 +1,7 @@
 import { httpResource } from '@angular/common/http';
 import { Component, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { params } from '../core/api.service';
 import { Agent, Policy, Run } from '../core/models';
 import { RunsTable, lookup } from '../shared/tables';
 
@@ -39,7 +40,7 @@ export class HistoryPage {
   protected readonly policies = httpResource<Policy[]>(() => '/api/admin/policies');
   protected readonly runs = httpResource<Run[]>(() => ({
     url: '/api/admin/runs',
-    params: { agentId: this.agentId(), limit: 200 },
+    params: params({ agentId: this.agentId(), limit: 200 }),
   }));
   protected readonly agentNames = computed(() => lookup(this.agents.value()));
   protected readonly policyNames = computed(() => lookup(this.policies.value()));

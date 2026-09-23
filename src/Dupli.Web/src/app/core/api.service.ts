@@ -28,7 +28,8 @@ import {
 
 type Query = Record<string, string | number | boolean | null | undefined>;
 
-function params(query: Query): HttpParams {
+/** Builds query params, dropping empty values (the server can't bind "" to Guid?/int?). */
+export function params(query: Query): HttpParams {
   let p = new HttpParams();
   for (const [key, value] of Object.entries(query)) {
     if (value !== null && value !== undefined && value !== '') p = p.set(key, String(value));
