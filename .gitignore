@@ -34,6 +34,8 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+# Source folders named Logs (e.g. Dupli.Contracts/Logs) are code, not log output.
+!src/**/Logs/
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
