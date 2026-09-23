@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (build + Agent.Core.Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Testcontainers.PostgreSql only starts the server; pg_dump/pg_dumpall must exist on the runner.
+      - name: Install postgresql-client-17
+        run: |
+          sudo apt-get update
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Test Dupli.Agent.Core.Tests
+        run: dotnet test tests/Dupli.Agent.Core.Tests --no-build
+        env:
+          DUPLI_TEST_PG_BIN: /usr/lib/postgresql/17/bin
+
+  windows:
+    name: Windows (build + Agent.Tests + publish)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Test Dupli.Agent.Tests
+        run: dotnet test tests/Dupli.Agent.Tests --no-build
+
+      - name: Publish Dupli.Agent (single-file, self-contained, win-x64)
+        run: >
+          dotnet publish src/Dupli.Agent/Dupli.Agent.csproj
+          -r win-x64 --self-contained
+          -p:PublishSingleFile=true
+          -o publish/dupli-agent
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dupli-agent-win-x64
+          path: publish/dupli-agent
