@@ -11,8 +11,8 @@ using Microsoft.Extensions.Options;
 namespace Dupli.Server.Background;
 
 /// <summary>
-/// Creates Pending jobs when a cron occurrence is due: backups per policy, Retention and
-/// RepositoryCheck per agent. Missed occurrences collapse into one job (only the latest counts),
+/// Creates Pending jobs when a cron occurrence is due: backups per policy, Retention,
+/// RepositoryCheck and RestoreTest per agent. Missed occurrences collapse into one job (only the latest counts),
 /// and the pending-job unique index keeps it to one per policy.
 /// </summary>
 public sealed class JobScheduler(
@@ -67,6 +67,13 @@ public sealed class JobScheduler(
             {
                 agent.LastCheckScheduledFor = check;
                 await jobs.CreateSystemJobAsync(agent.Id, JobType.RepositoryCheck, JobTrigger.System, check, ct);
+                await db.SaveChangesAsync(ct);
+            }
+
+            if (LatestDue(m.RestoreTestCron, m.TimeZone, agent.LastRestoreTestScheduledFor ?? baseline, now) is { } restoreTest)
+            {
+                agent.LastRestoreTestScheduledFor = restoreTest;
+                await jobs.CreateSystemJobAsync(agent.Id, JobType.RestoreTest, JobTrigger.System, restoreTest, ct);
                 await db.SaveChangesAsync(ct);
             }
         }

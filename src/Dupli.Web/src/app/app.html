@@ -1,0 +1,54 @@
+<header class="topbar">
+  <a class="brand" routerLink="/">Dupli</a>
+  @if (auth.user()?.authorized) {
+    <nav>
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
+        >Dashboard</a
+      >
+      <a routerLink="/agents" routerLinkActive="active">Agents</a>
+      <a routerLink="/history" routerLinkActive="active">History</a>
+      <a routerLink="/logs" routerLinkActive="active">Logs</a>
+      <a routerLink="/alerts" routerLinkActive="active">Alerts</a>
+      <a routerLink="/storage" routerLinkActive="active">Storage</a>
+    </nav>
+  }
+  <div class="user">
+    @if (auth.user(); as user) {
+      @if (user.authenticated) {
+        <span class="muted" [title]="user.email ?? ''">{{ user.name }}</span>
+        <button type="button" class="btn small" (click)="auth.logout()">Sign out</button>
+      }
+    }
+  </div>
+</header>
+
+<main class="content">
+  @if (auth.user(); as user) {
+    @if (user.mode === 'None') {
+      <section class="card notice">
+        <h1>Interactive login is not configured</h1>
+        <p>
+          Set <code>Dupli__Auth__Mode=EntraId</code> and the Entra ID settings on the server to use
+          the web UI. The admin API is still available with the
+          <code>X-Dupli-Admin-Key</code> header.
+        </p>
+      </section>
+    } @else if (!user.authorized) {
+      <section class="card notice">
+        <h1>Not authorized</h1>
+        <p>
+          You are signed in as <strong>{{ user.name }}</strong
+          >, but your account does not have the role required to use Dupli.
+        </p>
+        <button type="button" class="btn" (click)="auth.logout()">
+          Sign in with another account
+        </button>
+      </section>
+    } @else {
+      <router-outlet />
+    }
+  }
+</main>
+
+<app-confirm-dialog />
+<app-toasts />

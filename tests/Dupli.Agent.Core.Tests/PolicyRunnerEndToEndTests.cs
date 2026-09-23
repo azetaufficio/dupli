@@ -7,6 +7,7 @@ using Dupli.Agent.Core.Processes;
 using Dupli.Agent.Core.Secrets;
 using Dupli.Agent.Core.Snapshots;
 using Dupli.Agent.Core.Tests.Infrastructure;
+using Dupli.Agent.Core.Verification;
 using Dupli.Contracts.Policies;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -151,6 +152,22 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
         var globals = Assert.Single(await engine.ListSnapshotsAsync(repo, ["db=_globals"], default));
         await engine.RestoreAsync(new RestoreRequest(repo, globals.Id, target, []), default);
         Assert.Contains("CREATE ROLE app_user", await File.ReadAllTextAsync(Path.Combine(target, "globals.sql")));
+
+        // Restore test over the same repository: sample verified, every dump listed, the source without
+        // snapshots reported as failed, and the work directory removed.
+        var tester = new RestoreTester(engine, new StaticPostgresBinLocator([]), restic.Runner, NullLogger<RestoreTester>.Instance);
+        var work = _tmp.Combine("restore-test");
+        var test = await tester.RunAsync(repo, [policy], sampleFiles: 5, work, default);
+
+        Assert.False(test.Success);
+        var file = Assert.Single(test.Items, i => i.SourceId == "files");
+        Assert.True(file.Success, file.Error);
+        Assert.EndsWith("invoice.txt", file.Item);
+        Assert.Equal("No snapshot found for this source", Assert.Single(test.Items, i => i.SourceId == "broken").Error);
+        var dumps = test.Items.Where(i => i.SourceId == "pg").ToList();
+        Assert.Equal(new[] { "_globals", "app_one", "app_two" }, dumps.Select(i => i.Item).ToArray());
+        Assert.All(dumps, d => Assert.True(d.Success, d.Error));
+        Assert.False(Directory.Exists(work));
     }
 
     [SkippableFact]

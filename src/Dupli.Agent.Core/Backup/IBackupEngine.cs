@@ -12,6 +12,12 @@ public interface IBackupEngine
         IReadOnlyList<string> tags,
         CancellationToken cancellationToken);
 
+    /// <summary>Regular files of a snapshot (restic paths, forward slashes).</summary>
+    Task<IReadOnlyList<SnapshotFile>> ListFilesAsync(
+        RepositoryTarget repository,
+        string snapshotId,
+        CancellationToken cancellationToken);
+
     Task RestoreAsync(RestoreRequest request, CancellationToken cancellationToken);
 
     Task ForgetAsync(ForgetRequest request, CancellationToken cancellationToken);

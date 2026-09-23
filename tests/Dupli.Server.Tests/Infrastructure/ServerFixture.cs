@@ -51,13 +51,17 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
     public const string AdminKey = "test-admin-key";
 
     private readonly string _connectionString;
+    private readonly string _authMode;
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "dupli-tests", "server", Guid.NewGuid().ToString("N"));
 
     public FakeTimeProvider Time { get; } = new(DateTimeOffset.UtcNow);
     public CapturingNotificationChannel Notifications { get; } = new();
 
-    public DupliTestServer(PostgresFixture postgres) =>
+    public DupliTestServer(PostgresFixture postgres, string authMode = "None")
+    {
         _connectionString = postgres.ConnectionString($"dupli_{Guid.NewGuid():N}");
+        _authMode = authMode;
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -68,6 +72,7 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
         builder.UseSetting("Dupli:ToolMirrorPath", Path.Combine(_dataDir, "tools"));
         builder.UseSetting("Dupli:Admin:ApiKey", AdminKey);
         builder.UseSetting("Dupli:PublicUrl", "https://dupli.test");
+        builder.UseSetting("Dupli:Auth:Mode", _authMode);
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<TimeProvider>(Time);

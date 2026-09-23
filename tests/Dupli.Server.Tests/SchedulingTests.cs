@@ -121,7 +121,9 @@ public sealed class SchedulingTests(PostgresFixture postgres) : IAsyncLifetime
 
         var retention = Assert.Single(await JobsAsync(agent.AgentId, JobType.Retention));
         Assert.Single(await JobsAsync(agent.AgentId, JobType.RepositoryCheck));
+        var restoreTest = Assert.Single(await JobsAsync(agent.AgentId, JobType.RestoreTest));
         Assert.Equal(JobTrigger.System, retention.Trigger);
+        Assert.Equal(JobTrigger.System, restoreTest.Trigger);
 
         var polled = await (await agent.Client.GetAsync($"/api/agents/{agent.AgentId}/jobs")).ReadAsync<List<AgentJobDto>>();
         var first = Assert.Single(polled);

@@ -42,6 +42,7 @@ public sealed class Agent
 
     public DateTimeOffset? LastRetentionScheduledFor { get; set; }
     public DateTimeOffset? LastCheckScheduledFor { get; set; }
+    public DateTimeOffset? LastRestoreTestScheduledFor { get; set; }
 
     public bool IsOnline(DateTimeOffset now, TimeSpan offlineAfter) =>
         Status == AgentStatus.Active && LastHeartbeatAt is { } hb && now - hb <= offlineAfter;

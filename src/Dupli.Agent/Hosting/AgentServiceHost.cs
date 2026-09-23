@@ -60,6 +60,7 @@ public static class AgentServiceHost
                 sp.GetRequiredService<TimeProvider>(),
                 sp.GetRequiredService<ILogger<ServerClient>>()));
             services.AddSingleton<JobExecutor>();
+            services.AddSingleton<IAgentRestarter, ProcessExitRestarter>();
             services.AddHostedService<ServerAgentLoop>();
             services.AddHostedService<ServerLogUploader>();
         }

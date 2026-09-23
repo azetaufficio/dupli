@@ -29,7 +29,7 @@ Greenfield repository. Goal: central control plane for backing up Windows VMs (f
 | Concurrency | 1 job at a time per agent (local queue) |
 | Maintenance | Server-scheduled system jobs: `Retention` (forget+prune, weekly), `RepositoryCheck` (`check --read-data-subset=5%`, weekly) |
 | Restore proof | M1: `agent restore --snapshot --target` CLI (target `C:\DupliRestore\<id>` default). M2/M3: job **RestoreTest**: sample of files + last dump into tmp, verify hash + `pg_restore --list`, cleanup. Result in dashboard |
-| Notifications | `INotificationChannel` + **Email SMTP**. Alerts: agent offline, backup failed/missed, check/restore-test failed, backup too old. Dedup per condition |
+| Notifications | `INotificationChannel` + **Email SMTP** or **Office 365 (Microsoft Graph)**, selected by `Notifications:Channel`. Alerts: agent offline, backup failed/missed, check/restore-test failed, backup too old. Dedup per condition |
 | Migrations | **DbUp** (embedded SQL scripts, run at startup). EF Core for query only, no EF migrations |
 | Repo/CI | GitHub monorepo + Actions. Linux job (server + Agent.Core, Testcontainers Postgres+RustFS, real restic). Windows job (Agent, DPAPI, service, single-file publish). Artifacts: Docker image + agent exe |
 
@@ -79,6 +79,13 @@ Launcher/Updater: not created until M4.
 
 ## M3 — Web UI
 Angular + BFF Entra ID. Pages: dashboard (online/offline/failed/running counters + agent table §27), agent detail (§28 without Update/Restore; actions: Run now, Restart, Cancel, Generate enrollment token), policy editor (folders, PG instance + exclusions, cron+TZ, retention, storage target), backup history, logs, restore-test result, alerts.
+
+Implementation notes:
+- Auth modes `Dupli:Auth:Mode` = `EntraId` (OIDC code+PKCE, cookie session, optional required app role) | `Development` (local only, refused outside Development/Testing) | `None`. Cookie-authenticated mutations require the `XSRF-TOKEN` cookie echoed in `X-XSRF-TOKEN`; the admin key header stays for automation. API paths return 401/403, never a login redirect.
+- Storage target stays per agent (1 repo per VM): the policy editor shows it read-only.
+- RestoreTest: weekly system job per agent (`Maintenance:RestoreTestCron`). Directory sources: random sample of files from the latest snapshot restored with `restic restore --verify` + size check; PostgreSQL: latest dump of every database through `pg_restore --list`, globals non-empty. A source without snapshots fails. Per-item results stored on the job (`result_items`) and shown in the UI; failure raises `RestoreTestFailed`.
+- Restart agent: `RestartAgent` job (15 min expiry); the agent reports success, then exits with a non-zero code and the service recovery actions (`sc failure` + `failureflag`, set at install) restart it.
+- Disabled agents can be re-enabled (back to Pending, new enrollment token required).
 
 ## Verification
 - CI green on Linux (Agent.Core + Server + Integration with Testcontainers Postgres/RustFS/real restic) and Windows (Agent).

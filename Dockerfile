@@ -1,9 +1,18 @@
-# Dupli management server (control plane). Build from the repository root:
+# Dupli management server (control plane + web UI). Build from the repository root:
 #   docker build -t dupli-server .
+FROM node:24-alpine AS web
+WORKDIR /src/src/Dupli.Web
+COPY src/Dupli.Web/package.json src/Dupli.Web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY src/Dupli.Web/ ./
+# angular.json writes the build into ../Dupli.Server/wwwroot
+RUN npm run build
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY global.json Directory.Build.props ./
 COPY src/ src/
+COPY --from=web /src/src/Dupli.Server/wwwroot src/Dupli.Server/wwwroot
 RUN dotnet publish src/Dupli.Server/Dupli.Server.csproj -c Release -o /app --nologo
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0

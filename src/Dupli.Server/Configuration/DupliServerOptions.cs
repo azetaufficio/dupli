@@ -21,6 +21,7 @@ public sealed class DupliServerOptions
     public MaintenanceOptions Maintenance { get; set; } = new();
     public AlertOptions Alerts { get; set; } = new();
     public AdminOptions Admin { get; set; } = new();
+    public AuthOptions Auth { get; set; } = new();
 }
 
 public sealed class AgentOptions
@@ -49,6 +50,9 @@ public sealed class JobOptions
     public TimeSpan MaxRunDuration { get; set; } = TimeSpan.FromHours(24);
 
     public TimeSpan SchedulerInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Expiry of an operator "restart agent" request.</summary>
+    public TimeSpan RestartExpiry { get; set; } = TimeSpan.FromMinutes(15);
 }
 
 public sealed class MaintenanceOptions
@@ -57,6 +61,8 @@ public sealed class MaintenanceOptions
     public string CheckCron { get; set; } = "0 5 * * 3";
     public string TimeZone { get; set; } = "Europe/Rome";
     public int CheckReadDataSubsetPercent { get; set; } = 5;
+    public string RestoreTestCron { get; set; } = "0 7 * * 6";
+    public int RestoreTestSampleFiles { get; set; } = 20;
 }
 
 public sealed class AlertOptions
@@ -67,9 +73,45 @@ public sealed class AlertOptions
     public TimeSpan BackupMaxAge { get; set; } = TimeSpan.FromHours(48);
 }
 
-/// <summary>M2 stop-gap for the admin API until the Entra ID BFF of M3.</summary>
+/// <summary>Automation access to the admin API (scripts, CI). Operators use the web UI login instead.</summary>
 public sealed class AdminOptions
 {
-    /// <summary>Required value of the <c>X-Dupli-Admin-Key</c> header. Admin API disabled when empty.</summary>
+    /// <summary>Required value of the <c>X-Dupli-Admin-Key</c> header. Key access disabled when empty.</summary>
     public string? ApiKey { get; set; }
+}
+
+public enum AuthMode
+{
+    /// <summary>No interactive login: the web UI cannot be used, only the admin key.</summary>
+    None,
+
+    /// <summary>Operators sign in with Microsoft Entra ID (OIDC, server-side BFF).</summary>
+    EntraId,
+
+    /// <summary>Local development only: <c>/bff/login</c> signs in a fixed user without a password.</summary>
+    Development,
+}
+
+public sealed class AuthOptions
+{
+    public AuthMode Mode { get; set; } = AuthMode.None;
+    public EntraIdOptions EntraId { get; set; } = new();
+
+    /// <summary>Idle lifetime of the operator session cookie (sliding).</summary>
+    public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(8);
+
+    public string DevelopmentUser { get; set; } = "developer";
+}
+
+public sealed class EntraIdOptions
+{
+    public string Instance { get; set; } = "https://login.microsoftonline.com/";
+    public string? TenantId { get; set; }
+    public string? ClientId { get; set; }
+    public string? ClientSecret { get; set; }
+    public string CallbackPath { get; set; } = "/signin-oidc";
+    public string SignedOutCallbackPath { get; set; } = "/signout-callback-oidc";
+
+    /// <summary>When set, only users with this app role (the <c>roles</c> claim) may use the UI.</summary>
+    public string? RequiredRole { get; set; }
 }

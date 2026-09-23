@@ -1,6 +1,7 @@
 using Dupli.Agent.Cli;
 using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Errors;
+using Dupli.Agent.Restore;
 using Dupli.Contracts.Jobs;
 using Microsoft.Extensions.Logging;
 
@@ -24,6 +25,9 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
                 BackupJobPayload backup => await BackupAsync(backup, cancellationToken),
                 RetentionJobPayload retention => await RetentionAsync(retention, startedAt, cancellationToken),
                 RepositoryCheckJobPayload check => await CheckAsync(check, startedAt, cancellationToken),
+                RestoreTestJobPayload restoreTest => await RestoreTestAsync(job.JobId, restoreTest, startedAt, cancellationToken),
+                // The restart itself happens after the result is recorded (see ServerAgentLoop).
+                RestartAgentJobPayload => new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow() },
                 _ => Failed(startedAt, $"Job type {job.Type} is not supported by this agent version", ErrorKind.Permanent),
             };
         }
@@ -98,6 +102,35 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         return result.Success
             ? new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow() }
             : Failed(startedAt, string.Join('\n', result.Messages), ErrorKind.Permanent);
+    }
+
+    private async Task<JobResultDto> RestoreTestAsync(string jobId, RestoreTestJobPayload payload, DateTimeOffset startedAt, CancellationToken ct)
+    {
+        // Same rule as a manual restore: never inside a backed-up path.
+        var workDirectory = RestoreGuard.ResolveTarget(
+            Path.Combine(runtime.Paths.Tmp, "restore-test", jobId), jobId, runtime.Paths, payload.Policies);
+
+        await runtime.Engine.UnlockStaleAsync(runtime.Repository, ct);
+        var result = await runtime.RestoreTester.RunAsync(runtime.Repository, payload.Policies, payload.SampleFiles, workDirectory, ct);
+        var failed = result.Items.Where(i => !i.Success).ToList();
+
+        return new JobResultDto
+        {
+            Outcome = failed.Count == 0 ? JobOutcome.Succeeded : JobOutcome.Failed,
+            StartedAt = startedAt,
+            CompletedAt = time.GetUtcNow(),
+            Error = failed.Count == 0 ? null : Truncate($"{failed.Count} of {result.Items.Count} checks failed; first: {failed[0].Item}: {failed[0].Error}"),
+            ErrorKind = failed.Count == 0 ? null : nameof(ErrorKind.Permanent),
+            Items = result.Items.Select(i => new JobItemResultDto
+            {
+                SourceId = i.SourceId,
+                Item = i.Item,
+                Outcome = i.Success ? JobOutcome.Succeeded : JobOutcome.Failed,
+                SnapshotId = i.SnapshotId,
+                BytesProcessed = i.Bytes,
+                Error = i.Error,
+            }).ToList(),
+        };
     }
 
     private JobResultDto Failed(DateTimeOffset startedAt, string error, ErrorKind kind) => new()

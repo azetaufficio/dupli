@@ -6,7 +6,7 @@ using Dupli.Server.Domain.Monitoring;
 
 namespace Dupli.Server.Api;
 
-// Operator-facing DTOs (admin API, consumed by the M3 web UI). Not shared with the agent.
+// Operator-facing DTOs (admin API, consumed by the web UI). Not shared with the agent.
 
 public sealed record CreateStorageTargetRequest(string Name, string Endpoint, string Bucket, string? Region);
 
@@ -82,7 +82,8 @@ public sealed record JobDto(
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
     bool CancelRequested,
-    string? Error);
+    string? Error,
+    IReadOnlyList<JobItemResultDto> Items);
 
 public sealed record RunDto(
     Guid Id,
@@ -117,3 +118,13 @@ public sealed record AlertDto(
     DateTimeOffset? ResolvedAt);
 
 public sealed record CreateReleaseRequest(string Version, string Platform, string SourceUrl, string Sha256, bool MakeCurrent = true);
+
+public sealed record DashboardDto(DashboardCountersDto Counters, IReadOnlyList<DashboardAgentDto> Agents);
+
+public sealed record DashboardCountersDto(int Online, int Offline, int Pending, int BackupFailed, int BackupRunning, int OpenAlerts);
+
+/// <param name="LastRunStatus"><c>JobOutcome</c> name of the agent's most recent backup run.</param>
+/// <param name="RunningJob"><c>JobType</c> name of the active job, if any.</param>
+public sealed record DashboardAgentDto(AgentDto Agent, string? LastRunStatus, string? RunningJob, int OpenAlerts);
+
+public sealed record CronPreviewDto(bool Valid, string? Error, IReadOnlyList<DateTimeOffset> Next);

@@ -143,10 +143,35 @@ public sealed class ResticBackupEngine(
         var args = new List<string> { "restore", request.SnapshotId, "--target", request.TargetDirectory };
         foreach (var include in request.Includes)
             args.AddRange(["--include", include]);
+        if (request.Verify)
+            args.Add("--verify");
 
         var result = await RunAsync(request.Repository, args, null, cancellationToken);
         if (result.ExitCode != ResticExitCodes.Success)
             throw ResticErrors.FromExitCode("restore", result.ExitCode, result.StderrTail);
+    }
+
+    public async Task<IReadOnlyList<SnapshotFile>> ListFilesAsync(
+        RepositoryTarget repository,
+        string snapshotId,
+        CancellationToken cancellationToken)
+    {
+        // One JSON object per line: the snapshot first, then one per node.
+        var files = new List<SnapshotFile>();
+        var result = await RunAsync(repository, ["ls", "--json", snapshotId], null, cancellationToken, line =>
+        {
+            if (!TryParse(line, out var doc))
+                return;
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (GetString(root, "type") == "file" && GetString(root, "path") is { } path)
+                    files.Add(new SnapshotFile(path, GetLong(root, "size")));
+            }
+        });
+        if (result.ExitCode != ResticExitCodes.Success)
+            throw ResticErrors.FromExitCode("ls", result.ExitCode, result.StderrTail);
+        return files;
     }
 
     public async Task ForgetAsync(ForgetRequest request, CancellationToken cancellationToken)

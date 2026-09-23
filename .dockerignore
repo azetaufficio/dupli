@@ -7,3 +7,6 @@
 tests/
 deploy/
 *.md
+**/node_modules/
+**/.angular/
+src/Dupli.Server/wwwroot/

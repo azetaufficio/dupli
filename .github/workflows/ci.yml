@@ -42,10 +42,29 @@ jobs:
       - name: Test Dupli.IntegrationTests
         run: dotnet test tests/Dupli.IntegrationTests --no-build
 
+  web:
+    name: Web UI (Angular build + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/Dupli.Web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/Dupli.Web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm test -- --watch=false
+
   docker:
     name: Docker image (server)
     runs-on: ubuntu-latest
-    needs: linux
+    needs: [linux, web]
     permissions:
       contents: read
       packages: write

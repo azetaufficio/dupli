@@ -6,6 +6,7 @@ using Dupli.Agent.Core.Restic;
 using Dupli.Agent.Core.Secrets;
 using Dupli.Agent.Core.Snapshots;
 using Dupli.Agent.Core.Tools;
+using Dupli.Agent.Core.Verification;
 using Dupli.Agent.Secrets;
 using Microsoft.Extensions.Logging;
 
@@ -18,7 +19,8 @@ public sealed record AgentRuntime(
     ISecretStore Secrets,
     IBackupEngine Engine,
     RepositoryTarget Repository,
-    PolicyRunner PolicyRunner);
+    PolicyRunner PolicyRunner,
+    RestoreTester RestoreTester);
 
 public static class AgentRuntimeFactory
 {
@@ -47,6 +49,8 @@ public static class AgentRuntimeFactory
         var policyRunner = new PolicyRunner(
             engine, databases, snapshots, secrets, retry, time ?? TimeProvider.System, loggerFactory.CreateLogger<PolicyRunner>());
 
-        return new AgentRuntime(config, paths, secrets, engine, repository, policyRunner);
+        var restoreTester = new RestoreTester(engine, binLocator, processRunner, loggerFactory.CreateLogger<RestoreTester>());
+
+        return new AgentRuntime(config, paths, secrets, engine, repository, policyRunner, restoreTester);
     }
 }

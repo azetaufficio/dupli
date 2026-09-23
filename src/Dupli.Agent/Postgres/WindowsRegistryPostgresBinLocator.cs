@@ -26,6 +26,9 @@ public sealed partial class WindowsRegistryPostgresBinLocator(ILogger<WindowsReg
             return null;
         }
 
+        if (serverMajorVersion == IPostgresBinLocator.Newest)
+            return candidates.MaxBy(c => c.Major).BinDirectory;
+
         var exact = candidates.FirstOrDefault(c => c.Major == serverMajorVersion);
         if (exact.BinDirectory is not null)
             return exact.BinDirectory;

@@ -45,5 +45,8 @@ public sealed class Job
     public bool CancelRequested { get; set; }
     public string? Error { get; set; }
 
+    /// <summary>Serialized <c>JobItemResultDto</c> list (jsonb) from the agent's final report.</summary>
+    public string? ResultItems { get; set; }
+
     public bool IsTerminal => JobStateMachine.IsTerminal(State);
 }

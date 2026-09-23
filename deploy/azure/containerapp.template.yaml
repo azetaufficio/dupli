@@ -1,0 +1,82 @@
+# Azure Container Apps definition for dupli-server. Values come from environment variables via envsubst;
+# see docs/deploy-azure-container-apps.md. Never commit the rendered file: it contains secrets.
+location: ${LOC}
+properties:
+  managedEnvironmentId: ${ENV_ID}
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: auto
+      allowInsecure: false
+    secrets:
+      - name: db-connection
+        value: "${DB_CONNECTION}"
+      - name: agents-signing-key
+        value: "${SIGNING_KEY}"
+      - name: entra-client-secret
+        value: "${ENTRA_CLIENT_SECRET}"
+      - name: o365-client-secret
+        value: "${O365_CLIENT_SECRET}"
+  template:
+    containers:
+      - name: dupli-server
+        image: ${IMAGE}
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: ConnectionStrings__Dupli
+            secretRef: db-connection
+          - name: Dupli__PublicUrl
+            value: https://${FQDN}
+          - name: Dupli__Agents__SigningKey
+            secretRef: agents-signing-key
+          - name: Dupli__Auth__Mode
+            value: EntraId
+          - name: Dupli__Auth__EntraId__TenantId
+            value: ${ENTRA_TENANT_ID}
+          - name: Dupli__Auth__EntraId__ClientId
+            value: ${ENTRA_CLIENT_ID}
+          - name: Dupli__Auth__EntraId__ClientSecret
+            secretRef: entra-client-secret
+          - name: Dupli__Auth__EntraId__RequiredRole
+            value: "${ENTRA_REQUIRED_ROLE}"
+          - name: Notifications__Channel
+            value: Office365
+          - name: Notifications__Office365__TenantId
+            value: ${O365_TENANT_ID}
+          - name: Notifications__Office365__ClientId
+            value: ${O365_CLIENT_ID}
+          - name: Notifications__Office365__ClientSecret
+            secretRef: o365-client-secret
+          - name: Notifications__Office365__From
+            value: ${O365_FROM}
+          - name: Notifications__Office365__To__0
+            value: ${O365_TO}
+        probes:
+          - type: Liveness
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          - type: Readiness
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+        volumeMounts:
+          - volumeName: keys
+            mountPath: /var/lib/dupli/keys
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+    volumes:
+      - name: keys
+        storageType: AzureFile
+        storageName: dupli-keys
+        # The container runs as user "app" (uid 1654): the share must be writable by it.
+        mountOptions: "uid=1654,gid=1654,dir_mode=0700,file_mode=0600"

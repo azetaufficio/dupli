@@ -4,6 +4,7 @@ using Dupli.Server.Api;
 using Dupli.Server.Auth;
 using Dupli.Server.Background;
 using Dupli.Server.Configuration;
+using Dupli.Server.Hosting;
 using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Infrastructure.Notifications;
@@ -21,6 +22,17 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    // A fatal error (e.g. invalid configuration at startup) must end the process with a non-zero code so the
+    // container restart policy applies; in containers the default crash path can hang instead of exiting.
+    AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    {
+        Console.Error.WriteLine($"Fatal: {e.ExceptionObject}");
+        Environment.Exit(1);
+    };
+}
+
 builder.Services.AddSerilog((_, lc) => lc
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
@@ -29,7 +41,7 @@ builder.Services.AddSerilog((_, lc) => lc
 var dupli = builder.Configuration.GetSection(DupliServerOptions.Section);
 var serverOptions = dupli.Get<DupliServerOptions>() ?? new DupliServerOptions();
 builder.Services.Configure<DupliServerOptions>(dupli);
-builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection("Smtp"));
+builder.Services.AddDupliNotifications(builder.Configuration);
 
 var connectionString = builder.Configuration.GetConnectionString("Dupli")
     ?? throw new InvalidOperationException("ConnectionStrings:Dupli is required");
@@ -56,7 +68,6 @@ builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<AgentSigningKey>();
 builder.Services.AddSingleton<AgentTokenIssuer>();
 builder.Services.AddSingleton<SecretProtector>();
-builder.Services.AddSingleton<INotificationChannel, SmtpNotificationChannel>();
 builder.Services.AddScoped<EnrollmentService>();
 builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<ResticMirror>();
@@ -66,6 +77,7 @@ builder.Services.AddPeriodicTask<JobScheduler>(sp => Opt(sp).Jobs.SchedulerInter
 builder.Services.AddPeriodicTask<JobSweeper>(sp => Opt(sp).Jobs.SchedulerInterval, runWorkers);
 builder.Services.AddPeriodicTask<AlertEvaluator>(sp => Opt(sp).Alerts.EvaluationInterval, runWorkers);
 
+builder.AddDupliAuthentication(serverOptions);
 builder.Services.AddAuthentication()
     .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, _ => { })
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, AdminApiKeyHandler>(AuthConstants.AdminScheme, null);
@@ -81,27 +93,25 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             ClockSkew = TimeSpan.FromSeconds(30),
         };
     });
-builder.Services.AddAuthorizationBuilder()
-    .AddPolicy(AuthConstants.AgentPolicy, p => p
-        .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
-        .RequireAuthenticatedUser())
-    .AddPolicy(AuthConstants.AdminPolicy, p => p
-        .AddAuthenticationSchemes(AuthConstants.AdminScheme)
-        .RequireAuthenticatedUser());
 
 var app = builder.Build();
 
 DatabaseMigrator.Migrate(connectionString, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Dupli.Migrations"));
 
 app.UseForwardedHeaders();
+app.UseSecurityHeaders(serverOptions);
 app.UseSerilogRequestLogging();
 app.UseApiExceptions();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapAgentApi();
 app.MapAdminApi();
+app.MapBff();
+app.MapWebUi();
 
 app.Run();
 

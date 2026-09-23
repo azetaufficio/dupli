@@ -26,7 +26,13 @@ public interface IDatabaseBackupProvider
 /// <summary>Finds the PostgreSQL bin directory (pg_dump, pg_dumpall, pg_restore).</summary>
 public interface IPostgresBinLocator
 {
+    /// <summary>
+    /// Bin directory whose tools are compatible with <paramref name="serverMajorVersion"/>;
+    /// <see cref="Newest"/> asks for the most recent installation (e.g. pg_restore for a dump of unknown version).
+    /// </summary>
     string? FindBinDirectory(int serverMajorVersion);
+
+    public const int Newest = int.MaxValue;
 }
 
 public sealed partial class PostgresDumpProvider(

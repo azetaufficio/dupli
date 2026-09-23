@@ -28,7 +28,7 @@ namespace Dupli.IntegrationTests;
 
 /// <summary>
 /// Server in-process (real PostgreSQL) + agent components (real restic, RustFS S3): enrollment,
-/// run-now backup, idempotent redelivery, repository check, and crash recovery (Interrupted).
+/// run-now backup, idempotent redelivery, repository check, restore test, restart, and crash recovery (Interrupted).
 /// </summary>
 public sealed class AgentServerEndToEndTests : IAsyncLifetime
 {
@@ -137,6 +137,25 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         await loop.RunOnceAsync(CancellationToken.None);
         Assert.Equal(JobState.Succeeded, (await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{check.Id}"))).State);
 
+        // Restore test: the sampled file is restored, verified and reported per item; nothing is left behind.
+        var restoreTest = await Read<JobDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agent.Id}/jobs",
+            new RunSystemJobRequest(JobType.RestoreTest), DupliJson.Options));
+        await loop.RunOnceAsync(CancellationToken.None);
+        var tested = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{restoreTest.Id}"));
+        Assert.Equal(JobState.Succeeded, tested.State);
+        var verified = Assert.Single(tested.Items);
+        Assert.EndsWith("invoice.txt", verified.Item);
+        Assert.Equal(snapshotId, verified.SnapshotId);
+        Assert.Equal("INV-001".Length, verified.BytesProcessed);
+        Assert.False(Directory.Exists(Path.Combine(paths.Tmp, "restore-test", restoreTest.Id.ToString())));
+
+        // Restart: reported as succeeded first, then the process would exit.
+        var restart = await Read<JobDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agent.Id}/jobs",
+            new RunSystemJobRequest(JobType.RestartAgent), DupliJson.Options));
+        await loop.RunOnceAsync(CancellationToken.None);
+        Assert.Equal(JobState.Succeeded, (await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{restart.Id}"))).State);
+        Assert.Equal(1, _restarter.Restarts);
+
         // Crash mid-job: the job is Running locally when the process dies.
         var crashed = await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
         var client = CreateClient(config, secrets);
@@ -155,13 +174,15 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         Assert.Single(await runtime.Engine.ListSnapshotsAsync(runtime.Repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None));
     }
 
+    private readonly CountingRestarter _restarter = new();
+
     private (ServerAgentLoop Loop, AgentRuntime Runtime, JobLedger Ledger) CreateAgent(AgentPaths paths, AgentConfig config, ISecretStore secrets)
     {
         var runtime = AgentRuntimeFactory.Build(paths, config, _loggers, TimeProvider.System, secrets);
         var ledger = new JobLedger(paths.LedgerFile);
         var executor = new JobExecutor(runtime, ledger, TimeProvider.System, _loggers.CreateLogger<JobExecutor>());
         var loop = new ServerAgentLoop(CreateClient(config, secrets), ledger, executor, config, paths, TimeProvider.System,
-            _loggers.CreateLogger<ServerAgentLoop>());
+            _restarter, _loggers.CreateLogger<ServerAgentLoop>());
         return (loop, runtime, ledger);
     }
 
@@ -197,6 +218,13 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
             builder.UseSetting("Dupli:ToolMirrorPath", Path.Combine(dataDir, "tools"));
             builder.UseSetting("Dupli:Admin:ApiKey", AdminKey);
         }
+    }
+
+    private sealed class CountingRestarter : IAgentRestarter
+    {
+        public int Restarts { get; private set; }
+
+        public void Restart() => Restarts++;
     }
 
     private sealed class MemorySecretStore : ISecretStore

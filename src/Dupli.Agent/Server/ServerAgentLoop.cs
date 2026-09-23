@@ -19,6 +19,7 @@ public sealed class ServerAgentLoop(
     AgentConfig config,
     AgentPaths paths,
     TimeProvider time,
+    IAgentRestarter restarter,
     ILogger<ServerAgentLoop> logger) : BackgroundService
 {
     public static readonly string AgentVersion = typeof(ServerAgentLoop).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
@@ -175,6 +176,13 @@ public sealed class ServerAgentLoop(
         catch (Exception ex) when (ex is HttpRequestException or TimeoutException)
         {
             logger.LogWarning(ex, "Result of job {JobId} kept in the outbox, will be re-sent", job.JobId);
+        }
+
+        // Recorded in the ledger first, so the restart job is never executed twice.
+        if (job.Payload is RestartAgentJobPayload && result.Outcome == JobOutcome.Succeeded)
+        {
+            logger.LogWarning("Restart requested by the server (job {JobId})", job.JobId);
+            restarter.Restart();
         }
     }
 

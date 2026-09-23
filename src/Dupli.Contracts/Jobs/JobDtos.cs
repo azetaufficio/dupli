@@ -20,6 +20,7 @@ public sealed record AgentJobDto
 [JsonDerivedType(typeof(RetentionJobPayload), "retention")]
 [JsonDerivedType(typeof(RepositoryCheckJobPayload), "repositoryCheck")]
 [JsonDerivedType(typeof(RestoreTestJobPayload), "restoreTest")]
+[JsonDerivedType(typeof(RestartAgentJobPayload), "restartAgent")]
 public abstract record JobPayloadDto;
 
 public sealed record BackupJobPayload : JobPayloadDto
@@ -45,11 +46,22 @@ public sealed record RepositoryCheckJobPayload : JobPayloadDto
     public int ReadDataSubsetPercent { get; init; } = 5;
 }
 
-/// <summary>Restores a sample into a temporary directory and verifies it (executor lands in M3).</summary>
+/// <summary>
+/// Proves the backups can be read back: for each directory source, a sample of files from the latest
+/// snapshot is restored into a temporary directory and verified; for each PostgreSQL source, the latest
+/// dump of every database goes through <c>pg_restore --list</c>. Everything is deleted afterwards.
+/// </summary>
 public sealed record RestoreTestJobPayload : JobPayloadDto
 {
+    /// <summary>Policies whose snapshots are tested (by <c>policy=</c>/<c>source=</c> tags).</summary>
+    public IReadOnlyList<PolicySpecDto> Policies { get; init; } = [];
+
+    /// <summary>Files sampled per directory source.</summary>
     public int SampleFiles { get; init; } = 20;
 }
+
+/// <summary>The agent reports success, then exits so the service manager restarts it.</summary>
+public sealed record RestartAgentJobPayload : JobPayloadDto;
 
 public sealed record JobStartedRequest
 {

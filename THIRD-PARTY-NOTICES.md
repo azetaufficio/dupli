@@ -18,11 +18,26 @@ components listed below, each distributed under its own license.
 | System.Security.Cryptography.ProtectedData | MIT |
 | .NET runtime (self-contained publish) | MIT |
 
+## Runtime dependencies (management server and web UI)
+
+| Component | License |
+|---|---|
+| ASP.NET Core (incl. Authentication.JwtBearer, Authentication.OpenIdConnect, Data Protection) | MIT |
+| Entity Framework Core, EFCore.NamingConventions | MIT / Apache-2.0 |
+| Npgsql, Npgsql.EntityFrameworkCore.PostgreSQL | PostgreSQL License |
+| dbup-postgresql | MIT |
+| MailKit | MIT |
+| Azure.Identity (incl. Microsoft Identity Client) | MIT |
+| Microsoft Graph .NET SDK (Microsoft.Graph, Microsoft.Graph.Core, Kiota) | MIT |
+| Cronos | MIT |
+| Serilog.AspNetCore | Apache-2.0 |
+| Angular (`@angular/*`), RxJS, tslib | MIT / Apache-2.0 / 0BSD |
+
 ## External tools (not bundled)
 
 | Tool | License | How it is used |
 |---|---|---|
-| [restic](https://github.com/restic/restic) | BSD-2-Clause | Downloaded at runtime from the official GitHub release (pinned version and SHA-256) and run as a separate process. If a future server mirror redistributes the binary, it must ship restic's license with it. |
+| [restic](https://github.com/restic/restic) | BSD-2-Clause | Downloaded at runtime from the official GitHub release (pinned version and SHA-256) and run as a separate process. The management server can mirror the same pinned release for agents; redistributing it must keep restic's license with it. |
 | PostgreSQL client tools (`pg_dump`, `pg_dumpall`) | PostgreSQL License | Found on the host (existing PostgreSQL installation) and run as separate processes. |
 
 ## Test-only dependencies (not shipped)

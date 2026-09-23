@@ -40,14 +40,26 @@ public sealed class JobService(
             {
                 ReadDataSubsetPercent = options.Value.Maintenance.CheckReadDataSubsetPercent,
             },
+            JobType.RestoreTest => new RestoreTestJobPayload
+            {
+                Policies = (await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == agentId)
+                        .OrderBy(p => p.Name).ToListAsync(ct))
+                    .Select(PolicySpecBuilder.Build)
+                    .ToList(),
+                SampleFiles = options.Value.Maintenance.RestoreTestSampleFiles,
+            },
+            JobType.RestartAgent => new RestartAgentJobPayload(),
             _ => throw ApiException.BadRequest($"{type} is not a system job type"),
         };
-        return await CreateAsync(agentId, null, type, trigger, scheduledAt, payload, ct);
+
+        // A restart that could not be delivered soon is pointless later: expire it quickly.
+        var expiry = type == JobType.RestartAgent ? Jobs.RestartExpiry : Jobs.DefaultExpiry;
+        return await CreateAsync(agentId, null, type, trigger, scheduledAt, payload, ct, expiry);
     }
 
     private async Task<Job?> CreateAsync(
         Guid agentId, Guid? policyId, JobType type, JobTrigger trigger, DateTimeOffset scheduledAt,
-        JobPayloadDto payload, CancellationToken ct)
+        JobPayloadDto payload, CancellationToken ct, TimeSpan? expiry = null)
     {
         var pending = await db.Jobs.AnyAsync(j =>
             j.AgentId == agentId && j.PolicyId == policyId && j.Type == type &&
@@ -69,7 +81,7 @@ public sealed class JobService(
             Payload = JsonSerializer.Serialize(payload, DupliJson.Options),
             CreatedAt = time.GetUtcNow(),
             ScheduledAt = scheduledAt,
-            ExpiresAt = scheduledAt + Jobs.DefaultExpiry,
+            ExpiresAt = scheduledAt + (expiry ?? Jobs.DefaultExpiry),
         };
         db.Jobs.Add(job);
         try
@@ -187,6 +199,8 @@ public sealed class JobService(
 
         if (!job.IsTerminal)
             JobStateMachine.Transition(job, target, now, error);
+        if (result.Items.Count > 0)
+            job.ResultItems = JsonSerializer.Serialize(result.Items, DupliJson.Options);
         else
             logger.LogWarning("Late result for job {JobId} already {State}: run recorded, state kept", jobId, job.State);
 

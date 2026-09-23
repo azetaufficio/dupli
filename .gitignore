@@ -489,3 +489,7 @@ HANDOFF.md
 # Dupli local dev/deploy
 .dev/
 deploy/.env
+
+# Angular web UI: build output served by Dupli.Server, dependencies and cache
+src/Dupli.Server/wwwroot/
+src/Dupli.Web/.angular/

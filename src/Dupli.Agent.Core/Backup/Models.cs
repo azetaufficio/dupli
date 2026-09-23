@@ -71,11 +71,15 @@ public sealed record SnapshotInfo(
     IReadOnlyList<string> Paths,
     IReadOnlyList<string> Tags);
 
+/// <param name="Verify">Re-read restored files and check their content against the repository.</param>
 public sealed record RestoreRequest(
     RepositoryTarget Repository,
     string SnapshotId,
     string TargetDirectory,
-    IReadOnlyList<string> Includes);
+    IReadOnlyList<string> Includes,
+    bool Verify = false);
+
+public sealed record SnapshotFile(string Path, long Size);
 
 public sealed record ForgetRequest(
     RepositoryTarget Repository,

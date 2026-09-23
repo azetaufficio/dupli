@@ -24,8 +24,9 @@ public static class AgentInstaller
     {
         paths.EnsureCreated();
 
-        using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) })
+        using (var http = new HttpClient())
         {
+            http.Timeout = TimeSpan.FromSeconds(60);
             var secrets = new DpapiSecretStore(paths, Microsoft.Extensions.Logging.Abstractions.NullLogger<DpapiSecretStore>.Instance);
             await AgentEnrollment.EnrollAsync(serverUrl, token, paths, secrets, http, logger, cancellationToken);
         }
@@ -40,9 +41,9 @@ public static class AgentInstaller
         if (!PathsEqual(currentExecutable, targetExecutable))
             File.Copy(currentExecutable, targetExecutable, overwrite: true);
 
-        File.WriteAllText(
+        await File.WriteAllTextAsync(
             paths.CurrentVersionFile,
-            JsonSerializer.Serialize(new { version, exePath = targetExecutable }));
+            JsonSerializer.Serialize(new { version, exePath = targetExecutable }), cancellationToken);
 
         logger.LogInformation("Binaries staged at {Path}", targetExecutable);
 
@@ -67,8 +68,13 @@ public static class AgentInstaller
         string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
     [SupportedOSPlatform("windows")]
-    private static Task CreateWindowsServiceAsync(string exePath, ILogger logger, CancellationToken ct) =>
-        RunScAsync(["create", ServiceName, "binPath=", $"\"{exePath}\" run", "start=", "auto", "obj=", "LocalSystem"], logger, ct);
+    private static async Task CreateWindowsServiceAsync(string exePath, ILogger logger, CancellationToken ct)
+    {
+        await RunScAsync(["create", ServiceName, "binPath=", $"\"{exePath}\" run", "start=", "auto", "obj=", "LocalSystem"], logger, ct);
+        // Restart on crash and on the deliberate non-zero exit of a "restart agent" job.
+        await RunScAsync(["failure", ServiceName, "reset=", "86400", "actions=", "restart/5000/restart/5000/restart/60000"], logger, ct);
+        await RunScAsync(["failureflag", ServiceName, "1"], logger, ct);
+    }
 
     [SupportedOSPlatform("windows")]
     private static async Task RemoveWindowsServiceAsync(ILogger logger, CancellationToken ct)

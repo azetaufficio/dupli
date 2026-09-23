@@ -103,6 +103,11 @@ public sealed class AlertEvaluator(
             if (lastCheck is { State: JobState.Failed or JobState.TimedOut })
                 conditions.Add(new Condition(AlertKind.RepositoryCheckFailed, $"agent:{agent.Id}", agent.Id, null,
                     $"Repository check of {agent.Name} {lastCheck.State}: {lastCheck.Error}"));
+
+            var lastRestoreTest = await LatestFinishedAsync(agent.Id, null, JobType.RestoreTest, ct);
+            if (lastRestoreTest is { State: JobState.Failed or JobState.TimedOut })
+                conditions.Add(new Condition(AlertKind.RestoreTestFailed, $"agent:{agent.Id}", agent.Id, null,
+                    $"Restore test of {agent.Name} {lastRestoreTest.State}: {lastRestoreTest.Error}"));
         }
 
         var agentIds = agents.Select(a => a.Id).ToList();

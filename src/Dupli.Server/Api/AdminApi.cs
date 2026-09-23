@@ -7,6 +7,7 @@ using Dupli.Server.Auth;
 using Dupli.Server.Configuration;
 using Dupli.Server.Domain.Agents;
 using Dupli.Server.Domain.Jobs;
+using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Domain.Policies;
 using Dupli.Server.Domain.Tools;
 using Dupli.Server.Infrastructure.Database;
@@ -17,14 +18,20 @@ using Microsoft.Extensions.Options;
 
 namespace Dupli.Server.Api;
 
-/// <summary>Operator API under <c>/api/admin</c>. Backend for the M3 web UI.</summary>
+/// <summary>
+/// Operator API under <c>/api/admin</c>: backend of the web UI (session cookie + antiforgery) and of
+/// automation (admin key header).
+/// </summary>
 public static class AdminApi
 {
     private const int MaxPageSize = 500;
 
     public static void MapAdminApi(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").RequireAuthorization(AuthConstants.AdminPolicy);
+        var admin = app.MapGroup("/api/admin").RequireAuthorization(AuthConstants.AdminPolicy).RequireAntiforgeryForCookies();
+
+        admin.MapGet("/dashboard", DashboardAsync);
+        admin.MapGet("/cron/preview", CronPreview);
 
         admin.MapGet("/storage-targets", async (DupliDbContext db, CancellationToken ct) =>
             (await db.StorageTargets.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct)).Select(ToDto));
@@ -35,8 +42,11 @@ public static class AdminApi
         admin.MapPost("/agents", CreateAgentAsync);
         admin.MapPost("/agents/{id:guid}/enrollment-tokens", CreateEnrollmentTokenAsync);
         admin.MapPost("/agents/{id:guid}/disable", (Guid id, DupliDbContext db, CancellationToken ct) => SetStatusAsync(id, AgentStatus.Disabled, db, ct));
+        admin.MapPost("/agents/{id:guid}/enable", EnableAsync);
         admin.MapPost("/agents/{id:guid}/jobs", RunSystemJobAsync);
 
+        admin.MapGet("/policies", async (DupliDbContext db, CancellationToken ct) =>
+            (await db.Policies.AsNoTracking().Include(p => p.Sources).OrderBy(p => p.Name).ToListAsync(ct)).Select(ToDto));
         admin.MapGet("/agents/{id:guid}/policies", async (Guid id, DupliDbContext db, CancellationToken ct) =>
             (await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == id).OrderBy(p => p.Name).ToListAsync(ct))
                 .Select(ToDto));
@@ -136,6 +146,17 @@ public static class AdminApi
         return Results.NoContent();
     }
 
+    /// <summary>Disabled → Pending: the agent must enroll again (new token), its secret having been revoked.</summary>
+    private static async Task<IResult> EnableAsync(Guid id, DupliDbContext db, CancellationToken ct)
+    {
+        var agent = await db.Agents.FindAsync([id], ct) ?? throw ApiException.NotFound("Agent");
+        if (agent.Status != AgentStatus.Disabled)
+            throw ApiException.Conflict($"Agent is {agent.Status}, not Disabled");
+        agent.Status = AgentStatus.Pending;
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> RunSystemJobAsync(
         Guid id, RunSystemJobRequest request, DupliDbContext db, JobService jobs, TimeProvider time, CancellationToken ct)
     {
@@ -209,12 +230,14 @@ public static class AdminApi
     }
 
     private static async Task<IEnumerable<JobDto>> ListJobsAsync(
-        DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? policyId = null, JobState? state = null, int limit = 100)
+        DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? policyId = null, JobState? state = null,
+        JobType? type = null, int limit = 100)
     {
         var query = db.Jobs.AsNoTracking();
         if (agentId is { } a) query = query.Where(j => j.AgentId == a);
         if (policyId is { } p) query = query.Where(j => j.PolicyId == p);
         if (state is { } s) query = query.Where(j => j.State == s);
+        if (type is { } t) query = query.Where(j => j.Type == t);
         return (await query.OrderByDescending(j => j.CreatedAt).Take(Clamp(limit)).ToListAsync(ct)).Select(ToDto);
     }
 
@@ -238,12 +261,78 @@ public static class AdminApi
             .Select(l => new LogDto(l.Id, l.AgentId, l.JobId, l.Timestamp, l.Level, l.Message, l.Exception));
     }
 
-    private static async Task<IEnumerable<AlertDto>> ListAlertsAsync(DupliDbContext db, CancellationToken ct, bool open = true, int limit = 200)
+    private static async Task<IEnumerable<AlertDto>> ListAlertsAsync(
+        DupliDbContext db, CancellationToken ct, bool open = true, Guid? agentId = null, int limit = 200)
     {
         var query = db.Alerts.AsNoTracking();
         if (open) query = query.Where(a => a.ResolvedAt == null);
+        if (agentId is { } id) query = query.Where(a => a.AgentId == id);
         return (await query.OrderByDescending(a => a.OpenedAt).Take(Clamp(limit)).ToListAsync(ct))
             .Select(a => new AlertDto(a.Id, a.Kind, a.SubjectKey, a.AgentId, a.PolicyId, a.Message, a.OpenedAt, a.ResolvedAt));
+    }
+
+    private static async Task<DashboardDto> DashboardAsync(
+        DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        var offlineAfter = options.Value.Agents.OfflineAfter;
+        var agents = (await db.Agents.AsNoTracking().OrderBy(a => a.Name).ToListAsync(ct))
+            .Select(a => ToDto(a, now, offlineAfter)).ToList();
+
+        var running = (await db.Jobs.AsNoTracking()
+                .Where(j => j.State == JobState.Assigned || j.State == JobState.Running)
+                .Select(j => new { j.AgentId, j.Type })
+                .ToListAsync(ct))
+            .ToLookup(j => j.AgentId, j => j.Type);
+
+        // Latest run per agent (any policy): the "last backup" status column.
+        var lastRuns = (await db.Runs.AsNoTracking()
+                .GroupBy(r => r.AgentId)
+                .Select(g => g.OrderByDescending(r => r.CompletedAt).Select(r => new { r.AgentId, r.Status }).First())
+                .ToListAsync(ct))
+            .ToDictionary(r => r.AgentId, r => r.Status);
+
+        var openAlerts = await db.Alerts.AsNoTracking().Where(a => a.ResolvedAt == null)
+            .Select(a => new { a.AgentId, a.Kind }).ToListAsync(ct);
+        var alertsByAgent = openAlerts.Where(a => a.AgentId != null).ToLookup(a => a.AgentId!.Value);
+
+        var rows = agents.Select(a => new DashboardAgentDto(
+            a,
+            lastRuns.GetValueOrDefault(a.Id),
+            running[a.Id].Select(t => t.ToString()).FirstOrDefault(),
+            alertsByAgent[a.Id].Count())).ToList();
+
+        var active = agents.Where(a => a.Status == AgentStatus.Active).ToList();
+        return new DashboardDto(
+            new DashboardCountersDto(
+                Online: active.Count(a => a.Online),
+                Offline: active.Count(a => !a.Online),
+                Pending: agents.Count(a => a.Status == AgentStatus.Pending),
+                BackupFailed: openAlerts.Where(a => a.Kind == AlertKind.BackupFailed).Select(a => a.AgentId).Distinct().Count(),
+                BackupRunning: rows.Count(r => r.RunningJob == nameof(JobType.Backup)),
+                OpenAlerts: openAlerts.Count),
+            rows);
+    }
+
+    private static CronPreviewDto CronPreview(TimeProvider time, string cron, string timeZone = "Europe/Rome", int count = 5)
+    {
+        CronExpression expression;
+        try
+        {
+            expression = CronExpression.Parse(cron);
+        }
+        catch (CronFormatException ex)
+        {
+            return new CronPreviewDto(false, ex.Message, []);
+        }
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZone, out var zone))
+            return new CronPreviewDto(false, $"Unknown time zone '{timeZone}'", []);
+
+        var next = expression.GetOccurrences(time.GetUtcNow().UtcDateTime, DateTime.MaxValue, zone, fromInclusive: false)
+            .Take(Math.Clamp(count, 1, 20))
+            .Select(o => new DateTimeOffset(o, TimeSpan.Zero))
+            .ToList();
+        return new CronPreviewDto(true, null, next);
     }
 
     private static async Task<IResult> CreateReleaseAsync(CreateReleaseRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
@@ -317,7 +406,8 @@ public static class AdminApi
 
     private static JobDto ToDto(Job j) => new(
         j.Id, j.AgentId, j.PolicyId, j.Type, j.Trigger, j.State, j.CreatedAt, j.ScheduledAt, j.ExpiresAt,
-        j.StartedAt, j.CompletedAt, j.CancelRequested, j.Error);
+        j.StartedAt, j.CompletedAt, j.CancelRequested, j.Error,
+        j.ResultItems is null ? [] : JsonSerializer.Deserialize<List<JobItemResultDto>>(j.ResultItems, DupliJson.Options) ?? []);
 
     private static RunDto ToDto(BackupRun r) => new(
         r.Id, r.JobId, r.PolicyId, r.AgentId, r.StartedAt, r.CompletedAt, r.Status, r.BytesProcessed, r.BytesAdded,

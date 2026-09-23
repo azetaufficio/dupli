@@ -59,6 +59,7 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
             e.Property(x => x.Trigger).HasConversion<string>();
             e.Property(x => x.State).HasConversion<string>();
             e.Property(x => x.Payload).HasColumnType("jsonb");
+            e.Property(x => x.ResultItems).HasColumnType("jsonb");
             e.Ignore(x => x.IsTerminal);
         });
 
