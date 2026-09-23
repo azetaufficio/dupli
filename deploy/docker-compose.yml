@@ -1,0 +1,74 @@
+# Dupli server stack: server + PostgreSQL + Caddy (TLS). Usage:
+#   cp deploy/.env.example deploy/.env   # then edit it
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+# Local dev with a mail catcher (http://localhost:8025): add `--profile dev`.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dupli
+      POSTGRES_USER: dupli
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dupli -d dupli"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ${DUPLI_IMAGE:-ghcr.io/azetaufficio/dupli-server:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Dupli: Host=postgres;Database=dupli;Username=dupli;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
+      Dupli__PublicUrl: https://${DUPLI_HOST:?set DUPLI_HOST}
+      Dupli__Admin__ApiKey: ${DUPLI_ADMIN_API_KEY:?set DUPLI_ADMIN_API_KEY}
+      Smtp__Host: ${SMTP_HOST:-}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__Security: ${SMTP_SECURITY:-StartTls}
+      Smtp__Username: ${SMTP_USERNAME:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__From: ${SMTP_FROM:-dupli@localhost}
+      Smtp__To__0: ${SMTP_TO:-}
+    volumes:
+      # Keep the key ring OUT of the database volume and back it up separately:
+      # without it the escrowed repository passwords cannot be decrypted.
+      - dupli-keys:/var/lib/dupli/keys
+      - dupli-tools:/var/lib/dupli/tools
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DUPLI_HOST: ${DUPLI_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["dev"]
+    ports:
+      - "8025:8025"
+
+volumes:
+  pgdata:
+  dupli-keys:
+  dupli-tools:
+  caddy-data:
+  caddy-config:

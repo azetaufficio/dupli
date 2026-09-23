@@ -3,15 +3,17 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using Dupli.Agent.Configuration;
 using Dupli.Agent.Hosting;
+using Dupli.Agent.Secrets;
+using Dupli.Agent.Server;
 using Microsoft.Extensions.Logging;
 
 namespace Dupli.Agent.Install;
 
 /// <summary>
-/// M1 install/uninstall: stages the current executable under <c>versions\&lt;ver&gt;\</c>, writes
-/// <c>current.json</c> (the layout M4's updater will reuse) and registers the LocalSystem service on
-/// Windows. Server enrollment (exchanging --server/--token for AgentId/Secret/repo password/S3 key)
-/// is M2; for now the values are only logged.
+/// Install/uninstall: enrolls with the server (--server/--token exchanged for AgentId, secret, repository
+/// password and S3 key, all stored with DPAPI), stages the current executable under
+/// <c>versions\&lt;ver&gt;\</c>, writes <c>current.json</c> (the layout M4's updater will reuse) and registers
+/// the LocalSystem service on Windows. Enrollment runs first, so a rejected token leaves no service behind.
 /// </summary>
 public static class AgentInstaller
 {
@@ -21,6 +23,12 @@ public static class AgentInstaller
         AgentPaths paths, string serverUrl, string token, ILogger logger, CancellationToken cancellationToken)
     {
         paths.EnsureCreated();
+
+        using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) })
+        {
+            var secrets = new DpapiSecretStore(paths, Microsoft.Extensions.Logging.Abstractions.NullLogger<DpapiSecretStore>.Instance);
+            await AgentEnrollment.EnrollAsync(serverUrl, token, paths, secrets, http, logger, cancellationToken);
+        }
 
         var version = typeof(AgentInstaller).Assembly.GetName().Version?.ToString() ?? "0.0.0";
         var versionDirectory = Path.Combine(paths.Versions, version);
@@ -36,10 +44,7 @@ public static class AgentInstaller
             paths.CurrentVersionFile,
             JsonSerializer.Serialize(new { version, exePath = targetExecutable }));
 
-        logger.LogInformation(
-            "Install requested for server {Server}; enrollment (AgentId/Secret exchange) is implemented in M2. " +
-            "Binaries staged at {Path}", serverUrl, targetExecutable);
-        _ = token; // accepted for forward compatibility with M2 enrollment; unused until then.
+        logger.LogInformation("Binaries staged at {Path}", targetExecutable);
 
         if (OperatingSystem.IsWindows())
             await CreateWindowsServiceAsync(targetExecutable, logger, cancellationToken);

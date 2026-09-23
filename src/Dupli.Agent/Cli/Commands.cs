@@ -3,6 +3,7 @@ using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Install;
 using Dupli.Agent.Logging;
 using Dupli.Agent.Restore;
+using Dupli.Agent.Server;
 using Microsoft.Extensions.Logging;
 using Serilog;
 
@@ -48,8 +49,11 @@ public static class Commands
         using var logger = CreateLoggerFactory(paths, config.AgentName);
         var runtime = AgentRuntimeFactory.Build(paths, config, logger);
 
-        var resolvedTarget = RestoreGuard.ResolveTarget(
-            target, snapshotId, paths, config.Policies.Select(p => p.Policy).ToList());
+        // Server mode: source paths come from the policy specs last received with backup jobs.
+        var policies = config.Policies.Select(p => p.Policy).ToList();
+        if (config.Server is not null)
+            policies.AddRange(new JobLedger(paths.LedgerFile).KnownPolicies());
+        var resolvedTarget = RestoreGuard.ResolveTarget(target, snapshotId, paths, policies);
 
         using var _ = SerilogSetup.PushRun($"restore:{snapshotId}");
         await runtime.Engine.RestoreAsync(new RestoreRequest(runtime.Repository, snapshotId, resolvedTarget, includes), ct);
@@ -100,6 +104,21 @@ public static class Commands
         secrets.Set(name, value);
         Console.WriteLine($"Secret '{name}' stored.");
         return Task.FromResult(0);
+    }
+
+    /// <summary>Rotates the AgentSecret. The new value is stored before anything else can fail.</summary>
+    public static async Task<int> RotateSecretAsync(AgentPaths paths, CancellationToken ct)
+    {
+        var config = AgentConfigLoader.Load(paths.ConfigFile);
+        var server = config.Server ?? throw new InvalidOperationException("The agent is not enrolled with a server");
+        using var logger = CreateLoggerFactory(paths, server.AgentId);
+        var secrets = new Secrets.DpapiSecretStore(paths, logger.CreateLogger<Secrets.DpapiSecretStore>());
+
+        var client = new ServerClient(new HttpClient(), server, secrets, TimeProvider.System, logger.CreateLogger<ServerClient>());
+        var rotated = await client.RotateSecretAsync(ct);
+        secrets.Set(server.AgentSecretName, rotated.AgentSecret);
+        Console.WriteLine("Agent secret rotated.");
+        return 0;
     }
 
     public static Task<int> InstallAsync(AgentPaths paths, string server, string token, CancellationToken ct)

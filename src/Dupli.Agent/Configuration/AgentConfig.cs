@@ -20,6 +20,28 @@ public sealed record AgentConfig
 
     /// <summary>Overrides RESTIC_CACHE_DIR. Defaults to <see cref="AgentPaths.Cache"/>.</summary>
     public string? ResticCacheDir { get; init; }
+
+    /// <summary>Set after enrollment: the agent is driven by the server and local <see cref="Policies"/> are not scheduled.</summary>
+    public ServerConfig? Server { get; init; }
+}
+
+public sealed record ServerConfig
+{
+    public required string Url { get; init; }
+    public required string AgentId { get; init; }
+    public int PollIntervalSeconds { get; init; } = 30;
+
+    /// <summary>Name of the secret holding the AgentSecret in the local secret store.</summary>
+    public string AgentSecretName { get; init; } = SecretNames.AgentSecret;
+}
+
+/// <summary>Secret names written by enrollment.</summary>
+public static class SecretNames
+{
+    public const string AgentSecret = "agent-secret";
+    public const string RepositoryPassword = "repo-password";
+    public const string S3AccessKey = "s3-access-key";
+    public const string S3SecretKey = "s3-secret-key";
 }
 
 /// <summary>

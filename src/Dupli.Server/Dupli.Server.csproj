@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dupli.Contracts\Dupli.Contracts.csproj" />
+    <ProjectReference Include="..\Dupli.Server.Domain\Dupli.Server.Domain.csproj" />
+    <ProjectReference Include="..\Dupli.Server.Infrastructure\Dupli.Server.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Cronos" Version="0.13.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dupli.Server.Tests" />
+    <InternalsVisibleTo Include="Dupli.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

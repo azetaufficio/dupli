@@ -18,6 +18,7 @@ public sealed class AgentPaths
 
     public string ConfigFile => Path.Combine(Config, "agent.json");
     public string CurrentVersionFile => Path.Combine(Versions, "current.json");
+    public string LedgerFile => Path.Combine(Config, "agent.db");
 
     public AgentPaths(string? root = null)
     {

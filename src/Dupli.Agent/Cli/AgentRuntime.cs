@@ -22,11 +22,12 @@ public sealed record AgentRuntime(
 
 public static class AgentRuntimeFactory
 {
-    public static AgentRuntime Build(AgentPaths paths, AgentConfig config, ILoggerFactory loggerFactory, TimeProvider? time = null)
+    public static AgentRuntime Build(
+        AgentPaths paths, AgentConfig config, ILoggerFactory loggerFactory, TimeProvider? time = null, ISecretStore? secretStore = null)
     {
         paths.EnsureCreated();
 
-        ISecretStore secrets = new DpapiSecretStore(paths, loggerFactory.CreateLogger<DpapiSecretStore>());
+        var secrets = secretStore ?? new DpapiSecretStore(paths, loggerFactory.CreateLogger<DpapiSecretStore>());
         var repository = config.Repository.Resolve(secrets, config.ResticCacheDir ?? paths.Cache);
 
         var processRunner = new ProcessRunner(loggerFactory.CreateLogger<ProcessRunner>());

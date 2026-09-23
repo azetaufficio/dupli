@@ -15,7 +15,7 @@ public static class AgentCli
 
     public static RootCommand Build()
     {
-        var root = new RootCommand("Dupli agent - file and PostgreSQL backups via restic");
+        var root = new RootCommand("Dupli agent - file and database backups");
         root.Options.Add(HomeOption);
 
         root.Subcommands.Add(RunCommand());
@@ -25,6 +25,7 @@ public static class AgentCli
         root.Subcommands.Add(ForgetCommand());
         root.Subcommands.Add(CheckCommand());
         root.Subcommands.Add(SecretCommand());
+        root.Subcommands.Add(RotateSecretCommand());
         root.Subcommands.Add(InstallCommand());
         root.Subcommands.Add(UninstallCommand());
 
@@ -37,7 +38,7 @@ public static class AgentCli
 
     private static Command RunCommand()
     {
-        var command = new Command("run", "Runs the agent service loop (scheduler for local policies).");
+        var command = new Command("run", "Runs the agent service loop (server polling, or local policies when not enrolled).");
         command.SetAction((parseResult, ct) => AgentServiceHost.RunAsync(Paths(parseResult), ct));
         return command;
     }
@@ -117,12 +118,19 @@ public static class AgentCli
         return new Command("secret", "Manages local secrets (DPAPI-protected).") { set };
     }
 
+    private static Command RotateSecretCommand()
+    {
+        var command = new Command("rotate-secret", "Rotates the agent secret used to authenticate with the server.");
+        command.SetAction((parseResult, ct) => Commands.RotateSecretAsync(Paths(parseResult), ct));
+        return command;
+    }
+
     private static Command InstallCommand()
     {
         var server = new Option<string>("--server") { Description = "Management server URL.", Required = true };
         var token = new Option<string>("--token") { Description = "Single-use enrollment token.", Required = true };
 
-        var command = new Command("install", "Installs the agent as a Windows service (M1: local install only).") { server, token };
+        var command = new Command("install", "Enrolls with the server and installs the agent as a Windows service.") { server, token };
         command.SetAction((parseResult, ct) => Commands.InstallAsync(
             Paths(parseResult), parseResult.GetRequiredValue(server), parseResult.GetRequiredValue(token), ct));
         return command;

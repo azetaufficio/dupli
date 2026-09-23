@@ -1,0 +1,6 @@
+# Automatic HTTPS (ACME) for a public DUPLI_HOST; Caddy's local CA for "localhost".
+# Caddy forwards X-Forwarded-For/Proto/Host, which the server trusts.
+{$DUPLI_HOST} {
+	encode gzip
+	reverse_proxy server:8080
+}

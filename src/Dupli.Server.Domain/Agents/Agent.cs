@@ -1,0 +1,73 @@
+namespace Dupli.Server.Domain.Agents;
+
+public enum AgentStatus
+{
+    /// <summary>Created by an operator, waiting for an agent to enroll with a token.</summary>
+    Pending,
+    Active,
+    Disabled,
+}
+
+/// <summary>One Windows VM. Owns exactly one restic repository at <c>{StorageTarget}/{StoragePrefix}</c>.</summary>
+public sealed class Agent
+{
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+    public AgentStatus Status { get; set; } = AgentStatus.Pending;
+
+    public string? Hostname { get; set; }
+    public string? MachineId { get; set; }
+    public string? OsVersion { get; set; }
+    public string? Version { get; set; }
+    public string? ResticVersion { get; set; }
+    public DateTimeOffset? LastHeartbeatAt { get; set; }
+    public DateTimeOffset? LastBackupAt { get; set; }
+    public long? FreeDiskSpace { get; set; }
+
+    /// <summary>SHA-256 (hex) of the high-entropy agent secret. The secret itself is never stored.</summary>
+    public string? SecretHash { get; set; }
+    public DateTimeOffset? SecretRotatedAt { get; set; }
+
+    public Guid StorageTargetId { get; set; }
+    public StorageTarget? StorageTarget { get; set; }
+    public required string StoragePrefix { get; set; }
+    public required string S3AccessKeyId { get; set; }
+
+    /// <summary>Data Protection payloads (escrow). Decrypted only to deliver them at enrollment.</summary>
+    public required string S3SecretKeyProtected { get; set; }
+    public required string RepositoryPasswordProtected { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? EnrolledAt { get; set; }
+
+    public DateTimeOffset? LastRetentionScheduledFor { get; set; }
+    public DateTimeOffset? LastCheckScheduledFor { get; set; }
+
+    public bool IsOnline(DateTimeOffset now, TimeSpan offlineAfter) =>
+        Status == AgentStatus.Active && LastHeartbeatAt is { } hb && now - hb <= offlineAfter;
+}
+
+public sealed class EnrollmentToken
+{
+    public Guid Id { get; set; }
+    public Guid AgentId { get; set; }
+
+    /// <summary>SHA-256 (hex) of the token; the token is shown once to the operator.</summary>
+    public required string TokenHash { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? UsedAt { get; set; }
+
+    public bool IsUsable(DateTimeOffset now) => UsedAt is null && now < ExpiresAt;
+}
+
+/// <summary>S3 endpoint + bucket shared by many agents; each agent writes under its own prefix with its own key.</summary>
+public sealed class StorageTarget
+{
+    public Guid Id { get; set; }
+    public required string Name { get; set; }
+    public required string Endpoint { get; set; }
+    public required string Bucket { get; set; }
+    public string? Region { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
