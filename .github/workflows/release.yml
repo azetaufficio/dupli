@@ -86,7 +86,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }}
+          name: agent-${{ matrix.platform }}
           path: dist
 
   release:
@@ -95,8 +95,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Filter by prefix: docker/build-push-action also uploads a *.dockerbuild record artifact.
       - uses: actions/download-artifact@v4
         with:
+          pattern: agent-*
           path: dist
           merge-multiple: true
 
@@ -124,6 +126,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           push: true
