@@ -7,8 +7,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Version>0.1.0</Version>
     <Product>Dupli</Product>
-    <Authors>Azeta</Authors>
-    <Copyright>Copyright (c) 2026 Azeta</Copyright>
+    <Authors>Azeta Ufficio S.R.L.</Authors>
+    <Copyright>Copyright (c) 2026 Azeta Ufficio S.R.L.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/azetaufficio/dupli</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
