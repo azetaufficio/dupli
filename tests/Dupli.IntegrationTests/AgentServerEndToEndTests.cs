@@ -45,7 +45,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
     };
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "dupli-it", Guid.NewGuid().ToString("N"));
-    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:18-alpine").Build();
     private readonly IContainer _s3 = new ContainerBuilder("rustfs/rustfs:1.0.0")
         .WithEnvironment("RUSTFS_ACCESS_KEY", S3AccessKey)
         .WithEnvironment("RUSTFS_SECRET_KEY", S3SecretKey)
@@ -92,6 +92,14 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
             S3AccessKeyId = S3AccessKey, S3SecretAccessKey = S3SecretKey,
         }, DupliJson.Options));
         var token = await Read<EnrollmentTokenDto>(await admin.PostAsync($"/api/admin/agents/{agent.Id}/enrollment-tokens", null));
+
+        // Enrollment returns the restic build of the agent's platform: make sure the test host's one is published
+        // (Windows and Linux are seeded; e.g. macOS is not). Conflict = already there.
+        var (asset, assetSha) = ResticAssets[RuntimeInformation.RuntimeIdentifier];
+        var release = await admin.PostAsJsonAsync("/api/admin/releases/restic", new CreateReleaseRequest(
+            ResticVersion, ResticPlatform.Current, $"https://github.com/restic/restic/releases/download/v{ResticVersion}/{asset}", assetSha),
+            DupliJson.Options);
+        Assert.True(release.IsSuccessStatusCode || release.StatusCode == System.Net.HttpStatusCode.Conflict, await release.Content.ReadAsStringAsync());
 
         var data = Directory.CreateDirectory(Path.Combine(_root, "data")).FullName;
         await File.WriteAllTextAsync(Path.Combine(data, "invoice.txt"), "INV-001");

@@ -44,6 +44,25 @@ The image builds the web UI and the server; Caddy terminates TLS. Operator login
 
 Local development: run PostgreSQL, then `dotnet run --project src/Dupli.Server` (Development environment: automatic login) and `npm start` in `src/Dupli.Web` (dev server with a proxy to the API on port 5000).
 
+## Local test stack (Aspire)
+
+`src/Dupli.AppHost` starts everything needed to exercise the server end to end without Azure or a Windows VM. Requirements: Docker, Node.js, .NET SDK 10.
+
+```
+ASPIRE_ALLOW_UNSECURED_TRANSPORT=true dotnet run --project src/Dupli.AppHost --launch-profile http
+```
+
+| Resource | What it is |
+|---|---|
+| `postgres` | PostgreSQL: server database `dupli` + `sampledb` backed up by the agent |
+| `mailpit` | SMTP catcher for alert e-mails (web UI on its `http` endpoint) |
+| `rustfs` | S3-compatible storage for the restic repositories |
+| `server` | Management server on http://localhost:5000 (Development login, admin key `aspire-dev-admin-key`) |
+| `web` | Angular dev server on http://localhost:4200 |
+| `agent` | Linux container (`deploy/agent/Dockerfile`) running the agent |
+
+On first start the agent container registers itself through the admin API, enrolls, creates a `demo` policy (sample files + PostgreSQL) and queues a backup. Restarting via the UI works too: the container's entrypoint restarts the agent on exit code 75, as the Windows service recovery does. Everything is ephemeral: each run starts from an empty database and bucket. The Linux agent is a test vehicle only. On Linux, secrets are protected by file permissions (0600), not DPAPI, and enrollment over plain HTTP needs `DUPLI_ALLOW_INSECURE_HTTP=true`.
+
 ## Build and test
 
 Requires the .NET SDK 10 (see `global.json`).

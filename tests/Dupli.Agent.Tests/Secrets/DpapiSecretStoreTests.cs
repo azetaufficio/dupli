@@ -32,11 +32,19 @@ public sealed class DpapiSecretStoreTests : IDisposable
     }
 
     [SkippableFact]
-    public void NonWindows_set_is_rejected()
+    public void NonWindows_secret_roundtrips_through_an_owner_only_file()
     {
         Skip.If(OperatingSystem.IsWindows(), "exercises the non-Windows fallback only");
+        if (OperatingSystem.IsWindows())
+            return;
 
-        Assert.Throws<PlatformNotSupportedException>(() => Store().Set("my-secret", "value"));
+        Store().Set("my-secret", "value");
+
+        Assert.Equal("value", Store().Get("my-secret"));
+        var file = Path.Combine(_tmp.Path, "config", "secrets", "my-secret.secret");
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(Path.GetDirectoryName(file)!));
     }
 
     [SkippableFact]

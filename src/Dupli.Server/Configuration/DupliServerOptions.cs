@@ -99,7 +99,6 @@ public sealed class AuthOptions
 
     /// <summary>Idle lifetime of the operator session cookie (sliding).</summary>
     public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(8);
-
     public string DevelopmentUser { get; set; } = "developer";
 }
 

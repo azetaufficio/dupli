@@ -3,6 +3,8 @@ using Dupli.Contracts.Agents;
 using Dupli.Contracts.Tools;
 using Dupli.Server.Api;
 using Dupli.Server.Tests.Infrastructure;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Dupli.Server.Tests;
 
@@ -30,6 +32,25 @@ public sealed class EnrollmentTests(PostgresFixture postgres) : IAsyncLifetime
         var details = await (await _server.Admin().GetAsync($"/api/admin/agents/{agent.AgentId}")).ReadAsync<AgentDto>();
         Assert.Equal(Domain.Agents.AgentStatus.Active, details.Status);
         Assert.Equal("vm-01.local", details.Hostname);
+    }
+
+    [Theory]
+    [InlineData("linux_arm64", HttpStatusCode.OK)]
+    [InlineData("linux_amd64", HttpStatusCode.OK)]
+    [InlineData("plan9_mips", HttpStatusCode.BadRequest)]
+    public async Task Registration_returns_the_restic_build_of_the_agent_platform(string platform, HttpStatusCode expected)
+    {
+        var agent = await _server.CreateAgentAsync();
+        var token = await (await _server.Admin().PostAsync($"/api/admin/agents/{agent.Id}/enrollment-tokens", null)).ReadAsync<EnrollmentTokenDto>();
+
+        var response = await _server.CreateClient().PostJsonAsync("/api/agents/register", new RegisterAgentRequest
+        {
+            EnrollmentToken = token.Token, MachineId = "m", Hostname = "h", OsVersion = "Linux", AgentVersion = "0.1.0", Platform = platform,
+        });
+
+        Assert.Equal(expected, response.StatusCode);
+        if (expected == HttpStatusCode.OK)
+            Assert.EndsWith($"/api/tools/restic/0.19.1/{platform}", (await response.ReadAsync<RegisterAgentResponse>()).ResticManifest.DownloadUrl);
     }
 
     [Fact]
@@ -109,6 +130,46 @@ public sealed class EnrollmentTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal("vm-01.renamed", details.Hostname);
         Assert.Equal("0.19.1", details.ResticVersion);
         Assert.Equal(42, details.FreeDiskSpace);
+    }
+
+    [Fact]
+    public async Task Mirror_serves_cached_assets_with_a_relative_mirror_path()
+    {
+        // Relative ToolMirrorPath (as in appsettings.Development.json): must not be resolved against the web root.
+        var relative = Path.Combine("mirror-tests", Guid.NewGuid().ToString("N"));
+        var content = "fake restic archive"u8.ToArray();
+        var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        var cached = Path.Combine(relative, "restic", "9.9.9");
+        Directory.CreateDirectory(cached);
+        await File.WriteAllBytesAsync(Path.Combine(cached, "restic_9.9.9_linux_amd64.bz2"), content);
+        try
+        {
+            using var server = _server.WithWebHostBuilder(b => b.UseSetting("Dupli:ToolMirrorPath", relative));
+            var admin = server.CreateClient();
+            admin.DefaultRequestHeaders.Add(Auth.AuthConstants.AdminKeyHeader, DupliTestServer.AdminKey);
+            Assert.Equal(HttpStatusCode.Created, (await admin.PostJsonAsync("/api/admin/releases/restic", new CreateReleaseRequest(
+                "9.9.9", "linux_amd64", "https://example.com/restic_9.9.9_linux_amd64.bz2", sha, MakeCurrent: false))).StatusCode);
+
+            var response = await server.CreateClient().GetAsync("/api/tools/restic/9.9.9/linux_amd64");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(content, await response.Content.ReadAsByteArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(relative, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Duplicate_release_is_rejected_without_losing_the_current_one()
+    {
+        var duplicate = await _server.Admin().PostJsonAsync("/api/admin/releases/restic", new CreateReleaseRequest(
+            "0.19.1", "linux_amd64", "https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_linux_amd64.bz2",
+            "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c"));
+
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _server.CreateClient().GetAsync("/api/tools/restic/manifest?platform=linux_amd64")).StatusCode);
     }
 
     [Fact]

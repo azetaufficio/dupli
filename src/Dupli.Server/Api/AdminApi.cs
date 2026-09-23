@@ -342,6 +342,11 @@ public static class AdminApi
         if (!Uri.TryCreate(request.SourceUrl, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps)
             throw ApiException.BadRequest("sourceUrl must be an absolute https URL");
 
+        // One transaction: a conflicting insert must not leave the platform without a current release.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if (await db.Releases.AnyAsync(r => r.Product == Tools.ResticMirror.Product && r.Version == request.Version && r.Platform == request.Platform, ct))
+            throw ApiException.Conflict("This release already exists");
+
         if (request.MakeCurrent)
         {
             await db.Releases
@@ -362,6 +367,7 @@ public static class AdminApi
         };
         db.Releases.Add(release);
         await SaveOrConflictAsync(db, "This release already exists", ct);
+        await tx.CommitAsync(ct);
         return Results.Created($"/api/tools/restic/{release.Version}/{release.Platform}", null);
     }
 

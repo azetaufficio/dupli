@@ -10,9 +10,11 @@ using Microsoft.Extensions.Logging;
 namespace Dupli.Agent.Secrets;
 
 /// <summary>
-/// Windows: DPAPI (LocalMachine scope) file per secret under <c>config\secrets\&lt;name&gt;.bin</c>,
-/// restricted to SYSTEM+Administrators. Any other OS: read-only env fallback for local development,
-/// never a plaintext file.
+/// Windows (the supported platform): DPAPI (LocalMachine scope) file per secret under
+/// <c>config\secrets\&lt;name&gt;.bin</c>, restricted to SYSTEM+Administrators.
+/// Other OSes (test containers, development): <c>DUPLI_SECRET_&lt;NAME&gt;</c> environment variable first,
+/// then a file readable only by the agent's user (0600 in a 0700 directory). There is no OS key store
+/// there, so the file is protected by permissions only.
 /// </summary>
 public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore> logger) : ISecretStore
 {
@@ -20,7 +22,13 @@ public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore>
     {
         ValidateName(name);
         if (!OperatingSystem.IsWindows())
-            return Environment.GetEnvironmentVariable($"DUPLI_SECRET_{name.ToUpperInvariant()}");
+        {
+            var fromEnvironment = Environment.GetEnvironmentVariable($"DUPLI_SECRET_{name.ToUpperInvariant()}");
+            if (fromEnvironment is not null)
+                return fromEnvironment;
+            var plain = PlainSecretPath(name);
+            return File.Exists(plain) ? File.ReadAllText(plain) : null;
+        }
 
         var file = SecretPath(name);
         if (!File.Exists(file))
@@ -42,9 +50,10 @@ public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore>
     {
         ValidateName(name);
         if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException(
-                "Secrets are only persisted with DPAPI on Windows. For local development set " +
-                $"the environment variable DUPLI_SECRET_{name.ToUpperInvariant()} instead.");
+        {
+            SetPermissionProtected(name, value);
+            return;
+        }
 
         Directory.CreateDirectory(paths.Secrets);
         RestrictToSystemAndAdministrators(paths.Secrets);
@@ -58,7 +67,30 @@ public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore>
         logger.LogInformation("Secret '{Name}' stored at {Path}", name, file);
     }
 
+    [UnsupportedOSPlatform("windows")]
+    private void SetPermissionProtected(string name, string value)
+    {
+        Directory.CreateDirectory(paths.Secrets);
+        File.SetUnixFileMode(paths.Secrets, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        var file = PlainSecretPath(name);
+        var temp = file + ".tmp";
+        // Created with 0600 before any byte is written, then moved into place atomically.
+        using (var stream = new FileStream(temp, new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+        }))
+        using (var writer = new StreamWriter(stream))
+            writer.Write(value);
+        File.Move(temp, file, overwrite: true);
+        logger.LogWarning("Secret '{Name}' stored at {Path}, protected by file permissions only (no DPAPI on this OS)", name, file);
+    }
+
     private string SecretPath(string name) => Path.Combine(paths.Secrets, $"{name}.bin");
+
+    private string PlainSecretPath(string name) => Path.Combine(paths.Secrets, $"{name}.secret");
 
     private static void ValidateName(string name)
     {

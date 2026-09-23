@@ -32,7 +32,7 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
         {
             Environment.GetEnvironmentVariable("DUPLI_TEST_PG_BIN"),
             "/opt/homebrew/opt/libpq/bin",
-            "/usr/lib/postgresql/17/bin",
+            "/usr/lib/postgresql/18/bin",
             "/usr/bin",
         }
         .FirstOrDefault(d => d is not null && File.Exists(Path.Combine(d, OperatingSystem.IsWindows() ? "pg_dump.exe" : "pg_dump")));
@@ -47,7 +47,7 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
     {
         if (PgBin is null)
             return;
-        _pg = new PostgreSqlBuilder("postgres:17-alpine").WithPassword(PgPassword).Build();
+        _pg = new PostgreSqlBuilder("postgres:18-alpine").WithPassword(PgPassword).Build();
         _s3 = new ContainerBuilder("rustfs/rustfs:1.0.0")
             .WithEnvironment("RUSTFS_ACCESS_KEY", S3AccessKey)
             .WithEnvironment("RUSTFS_SECRET_KEY", S3SecretKey)

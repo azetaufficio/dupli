@@ -4,6 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Published as dupli-agent(.exe); the namespace stays Dupli.Agent. -->
+    <AssemblyName>dupli-agent</AssemblyName>
+    <RootNamespace>Dupli.Agent</RootNamespace>
     <!-- Keeps e_sqlite3 inside the single-file exe. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>

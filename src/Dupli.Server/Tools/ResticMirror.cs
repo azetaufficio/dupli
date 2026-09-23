@@ -46,7 +46,8 @@ public sealed class ResticMirror(
             return null;
 
         var fileName = Path.GetFileName(new Uri(release.SourceUrl).AbsolutePath);
-        var directory = Path.Combine(options.Value.ToolMirrorPath, Product, release.Version);
+        // Absolute on purpose: Results.File resolves relative paths against the web root, not the working directory.
+        var directory = Path.GetFullPath(Path.Combine(options.Value.ToolMirrorPath, Product, release.Version));
         var target = Path.Combine(directory, fileName);
         if (File.Exists(target))
             return (target, fileName);

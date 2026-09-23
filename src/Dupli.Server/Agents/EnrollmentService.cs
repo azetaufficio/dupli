@@ -60,8 +60,9 @@ public sealed class EnrollmentService(
         if (agent.MachineId is not null && agent.MachineId != request.MachineId)
             throw ApiException.Conflict("Agent is bound to a different machine");
 
-        var manifest = await mirror.GetManifestAsync(ResticMirror.DefaultPlatform, publicBaseUrl, ct)
-            ?? throw new InvalidOperationException("No current restic release configured");
+        var platform = string.IsNullOrWhiteSpace(request.Platform) ? ResticMirror.DefaultPlatform : request.Platform;
+        var manifest = await mirror.GetManifestAsync(platform, publicBaseUrl, ct)
+            ?? throw ApiException.BadRequest($"No current restic release for platform '{platform}'");
 
         var secret = SecretHashing.NewSecret();
         token.UsedAt = now;

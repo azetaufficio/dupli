@@ -17,13 +17,13 @@ jobs:
           global-json-file: global.json
 
       # Testcontainers.PostgreSql only starts the server; pg_dump/pg_dumpall must exist on the runner.
-      - name: Install postgresql-client-17
+      - name: Install postgresql-client-18
         run: |
           sudo apt-get update
           sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
+          sudo apt-get install -y postgresql-client-18
 
       - name: Restore
         run: dotnet restore
@@ -34,7 +34,7 @@ jobs:
       - name: Test Dupli.Agent.Core.Tests
         run: dotnet test tests/Dupli.Agent.Core.Tests --no-build
         env:
-          DUPLI_TEST_PG_BIN: /usr/lib/postgresql/17/bin
+          DUPLI_TEST_PG_BIN: /usr/lib/postgresql/18/bin
 
       - name: Test Dupli.Server.Tests
         run: dotnet test tests/Dupli.Server.Tests --no-build

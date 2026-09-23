@@ -6,6 +6,7 @@
 .dev/
 tests/
 deploy/
+!deploy/agent/
 *.md
 **/node_modules/
 **/.angular/

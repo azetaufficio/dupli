@@ -289,7 +289,7 @@ function supportedTimeZones(): string[] {
                       <input
                         [name]="'bin' + i"
                         [(ngModel)]="s.binDirectory"
-                        placeholder="C:\\Program Files\\PostgreSQL\\17\\bin"
+                        placeholder="C:\\Program Files\\PostgreSQL\\18\\bin"
                       />
                     </label>
                   </div>

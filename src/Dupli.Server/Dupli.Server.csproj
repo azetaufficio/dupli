@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <UserSecretsId>94ee7ea9-7044-429f-8c1c-aa7a1db4a4d5</UserSecretsId>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Dupli.Contracts\Dupli.Contracts.csproj" />
     <ProjectReference Include="..\Dupli.Server.Domain\Dupli.Server.Domain.csproj" />

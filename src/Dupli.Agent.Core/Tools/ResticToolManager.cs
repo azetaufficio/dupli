@@ -55,7 +55,7 @@ public sealed class ResticToolManager(
                 await DownloadVerifiedAsync(manifest, download, cancellationToken);
 
                 var stagedExe = Path.Combine(staging, ExeName);
-                Extract(manifest.DownloadUrl, download, stagedExe);
+                Extract(download, stagedExe);
                 File.Delete(download);
 
                 if (!OperatingSystem.IsWindows())
@@ -104,10 +104,14 @@ public sealed class ResticToolManager(
                 $"SHA256 mismatch for restic {manifest.Version}: expected {manifest.Sha256}, got {actual}");
     }
 
-    private static void Extract(string url, string archive, string destinationExe)
+    /// <summary>
+    /// The format comes from the file content, not the URL: the server mirror serves assets under
+    /// extension-less URLs (<c>/api/tools/restic/{version}/{platform}</c>).
+    /// </summary>
+    internal static void Extract(string archive, string destinationExe)
     {
-        var path = new Uri(url).AbsolutePath;
-        if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        var format = Sniff(archive);
+        if (format == ArchiveFormat.Zip)
         {
             using var zip = ZipFile.OpenRead(archive);
             var entry = zip.Entries.SingleOrDefault(e =>
@@ -116,7 +120,7 @@ public sealed class ResticToolManager(
                         ?? throw BackupException.Permanent("restic executable not found in zip archive");
             entry.ExtractToFile(destinationExe);
         }
-        else if (path.EndsWith(".bz2", StringComparison.OrdinalIgnoreCase))
+        else if (format == ArchiveFormat.BZip2)
         {
             using var input = File.OpenRead(archive);
             using var output = File.Create(destinationExe);
@@ -126,6 +130,20 @@ public sealed class ResticToolManager(
         {
             File.Copy(archive, destinationExe);
         }
+    }
+
+    private enum ArchiveFormat { Raw, Zip, BZip2 }
+
+    private static ArchiveFormat Sniff(string file)
+    {
+        Span<byte> header = stackalloc byte[4];
+        using var stream = File.OpenRead(file);
+        var read = stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
+        if (read >= 4 && header[0] == 'P' && header[1] == 'K' && header[2] == 3 && header[3] == 4)
+            return ArchiveFormat.Zip;
+        if (read >= 3 && header[0] == 'B' && header[1] == 'Z' && header[2] == 'h')
+            return ArchiveFormat.BZip2;
+        return ArchiveFormat.Raw;
     }
 
     private async Task VerifyVersionAsync(string exe, string expectedVersion, CancellationToken ct)

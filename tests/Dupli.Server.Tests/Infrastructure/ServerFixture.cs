@@ -17,7 +17,7 @@ namespace Dupli.Server.Tests.Infrastructure;
 /// <summary>One PostgreSQL container per test run; every <see cref="DupliTestServer"/> gets its own database.</summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:17-alpine").Build();
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine").Build();
 
     public string ConnectionString(string database) =>
         new Npgsql.NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = database }.ConnectionString;

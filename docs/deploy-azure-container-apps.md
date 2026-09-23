@@ -96,7 +96,7 @@ Poi crea l'app con identità gestita e pull da ACR (`az containerapp registry se
 az group create -n $RG -l $LOC
 
 az postgres flexible-server create -g $RG -n $PG -l $LOC \
-  --tier Burstable --sku-name Standard_B1ms --storage-size 32 --version 17 \
+  --tier Burstable --sku-name Standard_B1ms --storage-size 32 --version 18 \
   --admin-user $PG_ADMIN --admin-password "$PG_PASS" \
   --public-access 0.0.0.0 --yes
 
@@ -104,7 +104,7 @@ az postgres flexible-server db create -g $RG -s $PG -d dupli
 ```
 
 - `--public-access 0.0.0.0` crea la regola firewall "consenti servizi Azure": è la configurazione più semplice. Il DB resta protetto da password e TLS, ma la regola vale per qualunque servizio Azure, anche di altri tenant. Per chiudere di più servono VNet integration dell'ambiente ACA e accesso privato al DB (da valutare dopo, vedi HANDOFF).
-- Se `--version 17` non è disponibile nella region, usa `16`.
+- Se `--version 18` non è disponibile nella region, usa `17` (pg_dump 18 dell'agent la supporta).
 - Backup automatici: di default 7 giorni di retention. Il DB contiene i segreti in escrow, cifrati con il key ring del punto 4.
 
 Connection string (TLS con verifica del certificato):

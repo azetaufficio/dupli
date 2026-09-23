@@ -16,6 +16,12 @@ namespace Dupli.Agent.Server;
 /// </summary>
 public static class AgentEnrollment
 {
+    public const string AllowInsecureHttpVariable = "DUPLI_ALLOW_INSECURE_HTTP";
+
+    /// <summary>Local test stacks (Aspire, containers) talk to the server over HTTP on a non-loopback host.</summary>
+    private static bool AllowInsecureHttp =>
+        string.Equals(Environment.GetEnvironmentVariable(AllowInsecureHttpVariable), "true", StringComparison.OrdinalIgnoreCase);
+
     public static async Task<AgentConfig> EnrollAsync(
         string serverUrl,
         string enrollmentToken,
@@ -27,8 +33,9 @@ public static class AgentEnrollment
     {
         paths.EnsureCreated();
         var baseUri = new Uri(serverUrl.TrimEnd('/') + "/");
-        if (baseUri.Scheme != Uri.UriSchemeHttps && !baseUri.IsLoopback)
-            throw new InvalidOperationException($"Refusing to enroll over plain HTTP: {serverUrl}");
+        if (baseUri.Scheme != Uri.UriSchemeHttps && !baseUri.IsLoopback && !AllowInsecureHttp)
+            throw new InvalidOperationException(
+                $"Refusing to enroll over plain HTTP: {serverUrl} (development only: set {AllowInsecureHttpVariable}=true)");
 
         using var response = await http.PostAsJsonAsync(new Uri(baseUri, "api/agents/register"), new RegisterAgentRequest
         {
@@ -37,6 +44,7 @@ public static class AgentEnrollment
             Hostname = Environment.MachineName,
             OsVersion = RuntimeInformation.OSDescription,
             AgentVersion = ServerAgentLoop.AgentVersion,
+            Platform = ResticPlatform.Current,
         }, DupliJson.Options, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -85,6 +93,26 @@ public static class AgentEnrollment
         logger.LogInformation("Enrolled as agent {AgentId}; repository {Endpoint}/{Bucket}/{Prefix}",
             registration.AgentId, registration.Repository.Endpoint, registration.Repository.Bucket, registration.Repository.Prefix);
         return config;
+    }
+}
+
+public static class ResticPlatform
+{
+    /// <summary>Name of the restic release asset platform for this process (e.g. <c>linux_arm64</c>).</summary>
+    public static string Current
+    {
+        get
+        {
+            var os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "darwin" : "linux";
+            var arch = RuntimeInformation.OSArchitecture switch
+            {
+                Architecture.X64 => "amd64",
+                Architecture.Arm64 => "arm64",
+                Architecture.X86 => "386",
+                var other => other.ToString().ToLowerInvariant(),
+            };
+            return $"{os}_{arch}";
+        }
     }
 }
 

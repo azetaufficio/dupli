@@ -96,7 +96,7 @@ public sealed partial class WindowsRegistryPostgresBinLocator(ILogger<WindowsReg
         if (imagePath is null)
             return null;
 
-        // ImagePath is typically: "C:\Program Files\PostgreSQL\17\bin\pg_ctl.exe" ... (quoted, with args)
+        // ImagePath is typically: "C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" ... (quoted, with args)
         var path = imagePath.TrimStart('"');
         var end = path.IndexOf('"');
         if (end < 0)
@@ -117,7 +117,7 @@ public sealed partial class WindowsRegistryPostgresBinLocator(ILogger<WindowsReg
         return match.Success ? int.Parse(match.Groups[1].Value) : null;
     }
 
-    // Service name for the official installer, e.g. "postgresql-x64-17".
+    // Service name for the official installer, e.g. "postgresql-x64-18".
     [GeneratedRegex(@"^postgresql-x64-(\d+)$", RegexOptions.IgnoreCase)]
     private static partial Regex ServiceNameRegex();
 

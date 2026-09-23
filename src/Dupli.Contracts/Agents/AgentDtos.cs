@@ -13,6 +13,9 @@ public sealed record RegisterAgentRequest
     public required string Hostname { get; init; }
     public required string OsVersion { get; init; }
     public required string AgentVersion { get; init; }
+
+    /// <summary>restic release platform (<c>windows_amd64</c>, <c>linux_amd64</c>, <c>linux_arm64</c>). Windows when omitted.</summary>
+    public string? Platform { get; init; }
 }
 
 /// <summary>

@@ -23,6 +23,30 @@ public sealed class ResticToolManagerTests(ResticFixture restic) : IDisposable
     }
 
     [Fact]
+    public async Task Installs_from_an_extension_less_mirror_url()
+    {
+        // The server mirror serves /api/tools/restic/{version}/{platform}: the archive type must come from the content.
+        var upstream = ResticFixture.Manifest();
+        var mirrored = upstream with { DownloadUrl = $"https://dupli.test/api/tools/restic/{ResticFixture.Version}/current" };
+        var http = new HttpClient(new RewritingHandler(new Uri(upstream.DownloadUrl)));
+
+        var exe = await new ResticToolManager(_tmp.Path, http, restic.Runner, NullLogger<ResticToolManager>.Instance)
+            .EnsureInstalledAsync(mirrored, default);
+
+        Assert.True(File.Exists(exe));
+    }
+
+    /// <summary>Answers any request with the upstream release asset.</summary>
+    private sealed class RewritingHandler(Uri upstream) : DelegatingHandler(new HttpClientHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            request.RequestUri = upstream;
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task Checksum_mismatch_is_rejected_and_nothing_is_installed()
     {
         var manifest = ResticFixture.Manifest() with { Sha256 = new string('0', 64) };
