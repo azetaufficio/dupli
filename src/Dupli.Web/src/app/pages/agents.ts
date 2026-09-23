@@ -5,6 +5,7 @@ import { Router, RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import { Agent, CreateAgentRequest, StorageTarget } from '../core/models';
+import { agentUpdateStatus } from '../shared/agent-update-status';
 import { Badge } from '../shared/badge';
 import { DateTimePipe, RelativeTimePipe } from '../shared/format';
 import { lookup } from '../shared/tables';
@@ -112,6 +113,7 @@ import { lookup } from '../shared/tables';
                 <th>Name</th>
                 <th>Status</th>
                 <th>Hostname</th>
+                <th>Agent</th>
                 <th>Storage</th>
                 <th>Last heartbeat</th>
                 <th>Enrolled</th>
@@ -131,6 +133,10 @@ import { lookup } from '../shared/tables';
                     }
                   </td>
                   <td>{{ a.hostname ?? '—' }}</td>
+                  <td class="nowrap">
+                    <span class="mono">{{ a.version ?? '—' }}</span>
+                    <app-badge [value]="agentUpdateStatus(a)" />
+                  </td>
                   <td class="mono">
                     {{ storageNames()[a.storageTargetId] ?? '?' }}/{{ a.storagePrefix }}
                   </td>
@@ -148,6 +154,8 @@ import { lookup } from '../shared/tables';
 export class AgentsPage {
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
+
+  protected readonly agentUpdateStatus = agentUpdateStatus;
 
   protected readonly agents = httpResource<Agent[]>(() => '/api/admin/agents');
   protected readonly storageTargets = httpResource<StorageTarget[]>(

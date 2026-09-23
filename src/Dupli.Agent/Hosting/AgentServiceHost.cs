@@ -1,8 +1,10 @@
 using Dupli.Agent.Cli;
 using Dupli.Agent.Configuration;
+using Dupli.Agent.Launcher;
 using Dupli.Agent.Logging;
 using Dupli.Agent.Scheduling;
 using Dupli.Agent.Server;
+using Dupli.Agent.Updates;
 using Serilog;
 
 namespace Dupli.Agent.Hosting;
@@ -49,6 +51,11 @@ public static class AgentServiceHost
             sp.GetRequiredService<ILoggerFactory>(),
             sp.GetRequiredService<TimeProvider>()));
 
+        services.AddSingleton(new VersionFiles(paths));
+        services.AddSingleton<IAgentHealthReporter, LauncherHealthReporter>();
+        if (LauncherSupervisor.IsLaunched)
+            services.AddHostedService<StdinShutdownService>();
+
         if (config.Server is { } server)
         {
             services.AddSingleton(logBuffer!);
@@ -61,12 +68,34 @@ public static class AgentServiceHost
                 sp.GetRequiredService<ILogger<ServerClient>>()));
             services.AddSingleton<JobExecutor>();
             services.AddSingleton<IAgentRestarter, ProcessExitRestarter>();
+            services.AddSingleton<IPackageSignatureVerifier>(new AuthenticodeVerifier(config.Update));
+            services.AddSingleton(sp => new AgentUpdater(
+                sp.GetRequiredService<VersionFiles>(),
+                paths,
+                new HttpClient { Timeout = TimeSpan.FromMinutes(10) },
+                sp.GetRequiredService<AgentRuntime>().Processes,
+                sp.GetRequiredService<IPackageSignatureVerifier>(),
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<ILogger<AgentUpdater>>()));
+            services.AddSingleton(sp =>
+            {
+                var runtime = sp.GetRequiredService<AgentRuntime>();
+                return new ResticUpdater(runtime.Restic, runtime.ResticTools, runtime.Repository, paths, runtime.Processes,
+                    sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILoggerFactory>());
+            });
+            services.AddSingleton(sp => new AgentUpdates(
+                sp.GetRequiredService<AgentUpdater>(),
+                sp.GetRequiredService<ResticUpdater>(),
+                sp.GetRequiredService<AgentRuntime>().Restic,
+                sp.GetRequiredService<VersionFiles>(),
+                sp.GetRequiredService<IAgentHealthReporter>()));
             services.AddHostedService<ServerAgentLoop>();
             services.AddHostedService<ServerLogUploader>();
         }
         else
         {
             services.AddHostedService<PolicyScheduler>();
+            services.AddHostedService<StartupHealthService>();
         }
 
         return builder.Build();

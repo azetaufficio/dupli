@@ -23,6 +23,18 @@ public sealed record AgentConfig
 
     /// <summary>Set after enrollment: the agent is driven by the server and local <see cref="Policies"/> are not scheduled.</summary>
     public ServerConfig? Server { get; init; }
+
+    /// <summary>Local trust settings for agent updates. Never changed by the server.</summary>
+    public UpdateConfig Update { get; init; } = new();
+}
+
+public sealed record UpdateConfig
+{
+    /// <summary>Reject agent packages without a valid Authenticode signature (Windows only).</summary>
+    public bool RequireSignature { get; init; }
+
+    /// <summary>Accepted signer certificate thumbprints (SHA-1 hex). Empty = any valid, trusted signature.</summary>
+    public IReadOnlyList<string> SignerThumbprints { get; init; } = [];
 }
 
 public sealed record ServerConfig

@@ -46,5 +46,10 @@ export const routes: Routes = [
     title: 'Storage · Dupli',
     loadComponent: () => import('./pages/storage').then((m) => m.StoragePage),
   },
+  {
+    path: 'releases',
+    title: 'Releases · Dupli',
+    loadComponent: () => import('./pages/releases').then((m) => m.ReleasesPage),
+  },
   { path: '**', redirectTo: '' },
 ];

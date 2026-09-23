@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Cronos;
 using Dupli.Contracts;
 using Dupli.Contracts.Jobs;
@@ -13,6 +15,7 @@ using Dupli.Server.Domain.Tools;
 using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Infrastructure.Security;
 using Dupli.Server.Jobs;
+using Dupli.Server.Tools;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -25,6 +28,19 @@ namespace Dupli.Server.Api;
 public static class AdminApi
 {
     private const int MaxPageSize = 500;
+
+    /// <summary>Named <see cref="IHttpClientFactory"/> client used to import agent releases from GitHub, so tests can fake it.</summary>
+    public const string GitHubClientName = "dupli-github";
+
+    /// <summary>Platforms the release workflow publishes (and the GitHub import looks for).</summary>
+    private static readonly string[] PublishedAgentPlatforms = ["windows_amd64", "linux_amd64", "linux_arm64"];
+
+    /// <summary>Accepted for manually registered releases: also macOS, for development hosts.</summary>
+    private static readonly string[] AgentPlatforms = [.. PublishedAgentPlatforms, "darwin_arm64", "darwin_amd64"];
+    private static readonly string[] AgentChannels = ["dev", "beta", "stable"];
+
+    // Digits/dots, optional "-prerelease" suffix (dots allowed inside it too, e.g. 0.2.0-beta.1). No "+" or path characters.
+    private static readonly Regex VersionPattern = new(@"^\d+(\.\d+)*(-[A-Za-z0-9]+(\.[A-Za-z0-9]+)*)?$", RegexOptions.Compiled);
 
     public static void MapAdminApi(this IEndpointRouteBuilder app)
     {
@@ -44,6 +60,7 @@ public static class AdminApi
         admin.MapPost("/agents/{id:guid}/disable", (Guid id, DupliDbContext db, CancellationToken ct) => SetStatusAsync(id, AgentStatus.Disabled, db, ct));
         admin.MapPost("/agents/{id:guid}/enable", EnableAsync);
         admin.MapPost("/agents/{id:guid}/jobs", RunSystemJobAsync);
+        admin.MapPut("/agents/{id:guid}/update-settings", UpdateAgentSettingsAsync);
 
         admin.MapGet("/policies", async (DupliDbContext db, CancellationToken ct) =>
             (await db.Policies.AsNoTracking().Include(p => p.Sources).OrderBy(p => p.Name).ToListAsync(ct)).Select(ToDto));
@@ -66,7 +83,12 @@ public static class AdminApi
         admin.MapGet("/runs", ListRunsAsync);
         admin.MapGet("/logs", ListLogsAsync);
         admin.MapGet("/alerts", ListAlertsAsync);
+
+        admin.MapGet("/releases", ListReleasesAsync);
         admin.MapPost("/releases/restic", CreateReleaseAsync);
+        admin.MapPost("/releases/agent", CreateAgentReleaseAsync);
+        admin.MapPost("/releases/agent/import", ImportAgentReleaseAsync);
+        admin.MapPost("/releases/{id:guid}/make-current", MakeCurrentAsync);
     }
 
     private static async Task<IResult> CreateStorageTargetAsync(CreateStorageTargetRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
@@ -89,23 +111,48 @@ public static class AdminApi
     }
 
     private static async Task<IEnumerable<AgentDto>> ListAgentsAsync(
-        DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, CancellationToken ct)
+        DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, DesiredVersionResolver resolver, CancellationToken ct)
     {
         var now = time.GetUtcNow();
-        return (await db.Agents.AsNoTracking().OrderBy(a => a.Name).ToListAsync(ct))
-            .Select(a => ToDto(a, now, options.Value.Agents.OfflineAfter));
+        var agents = await db.Agents.AsNoTracking().OrderBy(a => a.Name).ToListAsync(ct);
+        var desired = await resolver.ResolveManyAsync(agents, ct); // one releases query for the whole list
+        return agents.Select(a => ToDto(a, now, options.Value.Agents.OfflineAfter, desired[a.Id]));
     }
 
     private static async Task<AgentDto> GetAgentAsync(
-        Guid id, DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, CancellationToken ct)
+        Guid id, DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, DesiredVersionResolver resolver, CancellationToken ct)
     {
         var agent = await db.Agents.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct) ?? throw ApiException.NotFound("Agent");
-        return ToDto(agent, time.GetUtcNow(), options.Value.Agents.OfflineAfter);
+        var desired = await resolver.ResolveAsync(agent, ct);
+        return ToDto(agent, time.GetUtcNow(), options.Value.Agents.OfflineAfter, desired);
+    }
+
+    private static async Task<IResult> UpdateAgentSettingsAsync(
+        Guid id, UpdateAgentSettingsRequest request, DupliDbContext db, CancellationToken ct)
+    {
+        if (!AgentChannels.Contains(request.Channel))
+            throw ApiException.BadRequest("channel must be dev, beta or stable");
+
+        var agent = await db.Agents.FindAsync([id], ct) ?? throw ApiException.NotFound("Agent");
+
+        if (request.PinnedAgentVersion is { } pinnedAgent
+            && !await db.Releases.AnyAsync(r => r.Product == ReleaseMirror.AgentProduct && r.Platform == agent.Platform && r.Version == pinnedAgent, ct))
+            throw ApiException.BadRequest($"No agent release {pinnedAgent} for platform {agent.Platform}");
+
+        if (request.PinnedResticVersion is { } pinnedRestic
+            && !await db.Releases.AnyAsync(r => r.Product == ReleaseMirror.ResticProduct && r.Platform == agent.Platform && r.Version == pinnedRestic, ct))
+            throw ApiException.BadRequest($"No restic release {pinnedRestic} for platform {agent.Platform}");
+
+        agent.Channel = request.Channel;
+        agent.PinnedAgentVersion = string.IsNullOrWhiteSpace(request.PinnedAgentVersion) ? null : request.PinnedAgentVersion;
+        agent.PinnedResticVersion = string.IsNullOrWhiteSpace(request.PinnedResticVersion) ? null : request.PinnedResticVersion;
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> CreateAgentAsync(
         CreateAgentRequest request, DupliDbContext db, SecretProtector protector,
-        IOptions<DupliServerOptions> options, TimeProvider time, CancellationToken ct)
+        IOptions<DupliServerOptions> options, TimeProvider time, DesiredVersionResolver resolver, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.StoragePrefix)
             || string.IsNullOrWhiteSpace(request.S3AccessKeyId) || string.IsNullOrWhiteSpace(request.S3SecretAccessKey))
@@ -127,7 +174,8 @@ public static class AdminApi
         };
         db.Agents.Add(agent);
         await SaveOrConflictAsync(db, "Agent name or storage prefix already in use", ct);
-        return Results.Created($"/api/admin/agents/{agent.Id}", ToDto(agent, time.GetUtcNow(), options.Value.Agents.OfflineAfter));
+        var desired = await resolver.ResolveAsync(agent, ct);
+        return Results.Created($"/api/admin/agents/{agent.Id}", ToDto(agent, time.GetUtcNow(), options.Value.Agents.OfflineAfter, desired));
     }
 
     private static async Task<EnrollmentTokenDto> CreateEnrollmentTokenAsync(
@@ -272,12 +320,13 @@ public static class AdminApi
     }
 
     private static async Task<DashboardDto> DashboardAsync(
-        DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, CancellationToken ct)
+        DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time, DesiredVersionResolver resolver, CancellationToken ct)
     {
         var now = time.GetUtcNow();
         var offlineAfter = options.Value.Agents.OfflineAfter;
-        var agents = (await db.Agents.AsNoTracking().OrderBy(a => a.Name).ToListAsync(ct))
-            .Select(a => ToDto(a, now, offlineAfter)).ToList();
+        var agentEntities = await db.Agents.AsNoTracking().OrderBy(a => a.Name).ToListAsync(ct);
+        var desiredByAgent = await resolver.ResolveManyAsync(agentEntities, ct);
+        var agents = agentEntities.Select(a => ToDto(a, now, offlineAfter, desiredByAgent[a.Id])).ToList();
 
         var running = (await db.Jobs.AsNoTracking()
                 .Where(j => j.State == JobState.Assigned || j.State == JobState.Running)
@@ -335,40 +384,154 @@ public static class AdminApi
         return new CronPreviewDto(true, null, next);
     }
 
-    private static async Task<IResult> CreateReleaseAsync(CreateReleaseRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
+    private static async Task<IResult> CreateReleaseAsync(
+        CreateReleaseRequest request, DupliDbContext db, TimeProvider time, IOptions<DupliServerOptions> options, CancellationToken ct)
     {
         if (request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit))
             throw ApiException.BadRequest("sha256 must be 64 hex characters");
-        if (!Uri.TryCreate(request.SourceUrl, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps)
-            throw ApiException.BadRequest("sourceUrl must be an absolute https URL");
+        ValidateSourceUrl(request.SourceUrl, options.Value.Releases.AllowInsecureSources);
 
-        // One transaction: a conflicting insert must not leave the platform without a current release.
+        var release = await CreateReleaseCoreAsync(
+            db, time, ReleaseMirror.ResticProduct, request.Version, request.Platform, channel: null,
+            request.SourceUrl, request.Sha256, request.MakeCurrent, ct);
+        return Results.Created($"/api/tools/restic/{release.Version}/{release.Platform}", ToDto(release));
+    }
+
+    private static async Task<IResult> CreateAgentReleaseAsync(
+        CreateAgentReleaseRequest request, DupliDbContext db, TimeProvider time, IOptions<DupliServerOptions> options, CancellationToken ct)
+    {
+        ValidateAgentReleaseFields(request.Version, request.Platform, request.Channel, request.Sha256);
+        ValidateSourceUrl(request.SourceUrl, options.Value.Releases.AllowInsecureSources);
+
+        var release = await CreateReleaseCoreAsync(
+            db, time, ReleaseMirror.AgentProduct, request.Version, request.Platform, request.Channel,
+            request.SourceUrl, request.Sha256, request.MakeCurrent, ct);
+        return Results.Created($"/api/tools/agent/{release.Version}/{release.Platform}", ToDto(release));
+    }
+
+    /// <summary>
+    /// Builds the GitHub Releases asset URLs for a tag (<c>dupli-agent_&lt;ver&gt;_&lt;platform&gt;[.exe]</c> +
+    /// <c>.sha256</c>) and registers whatever platform assets exist; a missing platform (404) is skipped.
+    /// </summary>
+    private static async Task<IResult> ImportAgentReleaseAsync(
+        ImportAgentReleaseRequest request, DupliDbContext db, TimeProvider time,
+        IHttpClientFactory httpClientFactory, IOptions<DupliServerOptions> options, CancellationToken ct)
+    {
+        if (!VersionPattern.IsMatch(request.Version))
+            throw ApiException.BadRequest("version must look like a semantic version (digits/dots, optional -prerelease)");
+        if (!AgentChannels.Contains(request.Channel))
+            throw ApiException.BadRequest("channel must be dev, beta or stable");
+
+        var repo = options.Value.Releases.GitHubRepository;
+        var client = httpClientFactory.CreateClient(GitHubClientName);
+        var registered = new List<ReleaseDto>();
+
+        foreach (var platform in PublishedAgentPlatforms)
+        {
+            var fileName = platform == "windows_amd64"
+                ? $"dupli-agent_{request.Version}_{platform}.exe"
+                : $"dupli-agent_{request.Version}_{platform}";
+            var assetUrl = $"https://github.com/{repo}/releases/download/v{request.Version}/{fileName}";
+
+            using var shaResponse = await client.GetAsync($"{assetUrl}.sha256", ct);
+            if (shaResponse.StatusCode == HttpStatusCode.NotFound)
+                continue;
+            shaResponse.EnsureSuccessStatusCode();
+
+            // sha256sum format: "<hex>  <filename>". We only need the first token.
+            var shaContent = await shaResponse.Content.ReadAsStringAsync(ct);
+            var sha256 = shaContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+            if (sha256.Length != 64 || !sha256.All(Uri.IsHexDigit))
+                throw new InvalidOperationException($"Unexpected .sha256 content for {fileName}: '{shaContent}'");
+
+            var release = await CreateReleaseCoreAsync(
+                db, time, ReleaseMirror.AgentProduct, request.Version, platform, request.Channel,
+                assetUrl, sha256, request.MakeCurrent, ct);
+            registered.Add(ToDto(release));
+        }
+
+        if (registered.Count == 0)
+            throw ApiException.BadRequest($"No agent release assets found on GitHub for version {request.Version} (tag v{request.Version})");
+
+        return Results.Ok(registered);
+    }
+
+    private static async Task<IResult> MakeCurrentAsync(Guid id, DupliDbContext db, CancellationToken ct)
+    {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        if (await db.Releases.AnyAsync(r => r.Product == Tools.ResticMirror.Product && r.Version == request.Version && r.Platform == request.Platform, ct))
-            throw ApiException.Conflict("This release already exists");
-
-        if (request.MakeCurrent)
+        var release = await db.Releases.SingleOrDefaultAsync(r => r.Id == id, ct) ?? throw ApiException.NotFound("Release");
+        if (!release.IsCurrent)
         {
             await db.Releases
-                .Where(r => r.Product == Tools.ResticMirror.Product && r.Platform == request.Platform && r.IsCurrent)
+                .Where(r => r.Product == release.Product && r.Platform == release.Platform && r.Channel == release.Channel && r.IsCurrent)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.IsCurrent, false), ct);
+            release.IsCurrent = true;
+            await db.SaveChangesAsync(ct);
+        }
+        await tx.CommitAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IEnumerable<ReleaseDto>> ListReleasesAsync(DupliDbContext db, CancellationToken ct, string product = ReleaseMirror.ResticProduct) =>
+        (await db.Releases.AsNoTracking().Where(r => r.Product == product).OrderByDescending(r => r.CreatedAt).ToListAsync(ct))
+            .Select(ToDto);
+
+    /// <summary>Shared insert path for restic and agent releases: one transaction so a conflict never leaves the
+    /// product/platform/channel without a current release.</summary>
+    private static async Task<SoftwareRelease> CreateReleaseCoreAsync(
+        DupliDbContext db, TimeProvider time, string product, string version, string platform, string? channel,
+        string sourceUrl, string sha256, bool makeCurrent, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if (await db.Releases.AnyAsync(r => r.Product == product && r.Version == version && r.Platform == platform, ct))
+            throw ApiException.Conflict("This release already exists");
+
+        if (makeCurrent)
+        {
+            await db.Releases
+                .Where(r => r.Product == product && r.Platform == platform && r.Channel == channel && r.IsCurrent)
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.IsCurrent, false), ct);
         }
 
         var release = new SoftwareRelease
         {
             Id = Guid.NewGuid(),
-            Product = Tools.ResticMirror.Product,
-            Version = request.Version,
-            Platform = request.Platform,
-            SourceUrl = request.SourceUrl,
-            Sha256 = request.Sha256.ToLowerInvariant(),
-            IsCurrent = request.MakeCurrent,
+            Product = product,
+            Version = version,
+            Platform = platform,
+            Channel = channel,
+            SourceUrl = sourceUrl,
+            Sha256 = sha256.ToLowerInvariant(),
+            IsCurrent = makeCurrent,
             CreatedAt = time.GetUtcNow(),
         };
         db.Releases.Add(release);
         await SaveOrConflictAsync(db, "This release already exists", ct);
         await tx.CommitAsync(ct);
-        return Results.Created($"/api/tools/restic/{release.Version}/{release.Platform}", null);
+        return release;
+    }
+
+    private static void ValidateSourceUrl(string sourceUrl, bool allowInsecure)
+    {
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var url))
+            throw ApiException.BadRequest("sourceUrl must be an absolute URL");
+        var ok = allowInsecure ? url.Scheme is "https" or "http" or "file" : url.Scheme == Uri.UriSchemeHttps;
+        if (!ok)
+            throw ApiException.BadRequest(allowInsecure
+                ? "sourceUrl must use https, http or file"
+                : "sourceUrl must be an absolute https URL");
+    }
+
+    private static void ValidateAgentReleaseFields(string version, string platform, string channel, string sha256)
+    {
+        if (!VersionPattern.IsMatch(version))
+            throw ApiException.BadRequest("version must look like a semantic version (digits/dots, optional -prerelease)");
+        if (!AgentPlatforms.Contains(platform))
+            throw ApiException.BadRequest($"platform must be one of {string.Join(", ", AgentPlatforms)}");
+        if (!AgentChannels.Contains(channel))
+            throw ApiException.BadRequest("channel must be dev, beta or stable");
+        if (sha256.Length != 64 || !sha256.All(Uri.IsHexDigit))
+            throw ApiException.BadRequest("sha256 must be 64 hex characters");
     }
 
     private static async Task<BackupPolicy> LoadPolicyAsync(Guid id, DupliDbContext db, CancellationToken ct, bool tracking)
@@ -393,9 +556,15 @@ public static class AdminApi
 
     private static StorageTargetDto ToDto(StorageTarget s) => new(s.Id, s.Name, s.Endpoint, s.Bucket, s.Region);
 
-    private static AgentDto ToDto(Agent a, DateTimeOffset now, TimeSpan offlineAfter) => new(
+    private static AgentDto ToDto(Agent a, DateTimeOffset now, TimeSpan offlineAfter, (SoftwareRelease? Agent, SoftwareRelease? Restic) desired) => new(
         a.Id, a.Name, a.Status, a.IsOnline(now, offlineAfter), a.Hostname, a.OsVersion, a.Version, a.ResticVersion,
-        a.LastHeartbeatAt, a.LastBackupAt, a.FreeDiskSpace, a.StorageTargetId, a.StoragePrefix, a.CreatedAt, a.EnrolledAt);
+        a.LastHeartbeatAt, a.LastBackupAt, a.FreeDiskSpace, a.StorageTargetId, a.StoragePrefix, a.CreatedAt, a.EnrolledAt,
+        a.Platform, a.Channel, a.PinnedAgentVersion, a.PinnedResticVersion, a.LauncherManaged,
+        desired.Agent?.Version, desired.Restic?.Version,
+        a.LastUpdateVersion, a.LastUpdateOutcome, a.LastUpdateError, a.LastUpdateAt, a.ResticUpdateError);
+
+    private static ReleaseDto ToDto(SoftwareRelease r) =>
+        new(r.Id, r.Product, r.Version, r.Platform, r.Channel, r.SourceUrl, r.Sha256, r.IsCurrent, r.CreatedAt);
 
     private static PolicyDto ToDto(BackupPolicy p) => new(
         p.Id, p.AgentId, p.Name, p.Cron, p.TimeZone, p.Enabled, PolicySpecBuilder.Retention(p),

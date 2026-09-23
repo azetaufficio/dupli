@@ -43,7 +43,7 @@ public static class AgentEnrollment
             MachineId = MachineIdentity.Get(),
             Hostname = Environment.MachineName,
             OsVersion = RuntimeInformation.OSDescription,
-            AgentVersion = ServerAgentLoop.AgentVersion,
+            AgentVersion = Configuration.AgentVersion.Current,
             Platform = ResticPlatform.Current,
         }, DupliJson.Options, cancellationToken);
 
@@ -78,6 +78,7 @@ public static class AgentEnrollment
             ResticManifest = registration.ResticManifest,
             Retry = previous?.Retry ?? new RetryConfig(),
             ResticCacheDir = previous?.ResticCacheDir,
+            Update = previous?.Update ?? new UpdateConfig(),
             Server = new ServerConfig
             {
                 Url = baseUri.ToString().TrimEnd('/'),

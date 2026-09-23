@@ -29,6 +29,8 @@ var server = builder.AddProject<Projects.Dupli_Server>("server", launchProfileNa
     .WaitFor(dupliDb)
     .WithEnvironment("Dupli__Auth__Mode", "Development")
     .WithEnvironment("Dupli__Admin__ApiKey", adminKey)
+    // Lets a locally built agent be registered as a release with a file:// source, to try updates and rollbacks.
+    .WithEnvironment("Dupli__Releases__AllowInsecureSources", "true")
     .WithEnvironment("Notifications__Channel", "Smtp")
     .WithEnvironment("Notifications__Smtp__Host", smtp.Property(EndpointProperty.Host))
     .WithEnvironment("Notifications__Smtp__Port", smtp.Property(EndpointProperty.Port))

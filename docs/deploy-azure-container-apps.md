@@ -371,7 +371,7 @@ Prerequisiti della VM:
 - se fai backup di PostgreSQL: PostgreSQL installato con l'installer standard, così `pg_dump` viene trovato dal registro; altrimenti imposti *Bin directory* nella policy.
 
 Procedura:
-1. Scarica l'exe: GitHub → Actions → ultima run verde su `main` → artifact **dupli-agent-win-x64**, oppure `gh run download -n dupli-agent-win-x64`. Copia `dupli-agent.exe` sulla VM, per esempio in `C:\Temp`.
+1. Scarica l'exe dalla release GitHub (`dupli-agent_<ver>_windows_amd64.exe`, con il suo `.sha256`), oppure dall'artifact **dupli-agent-win-x64** dell'ultima run verde su `main`. Copialo sulla VM come `C:\Temp\dupli-agent.exe`.
 2. Apri **PowerShell come Amministratore**:
    ```powershell
    cd C:\Temp
@@ -379,16 +379,16 @@ Procedura:
    .\dupli-agent.exe install --server https://<FQDN> --token <TOKEN>
    sc.exe start DupliAgent
    ```
-   L'install fa l'enrollment e salva segreti, password del repository e chiave S3 con DPAPI. Poi copia l'exe in `C:\ProgramData\Dupli\versions\0.1.0.0\` e registra il servizio `DupliAgent` (LocalSystem, avvio automatico, riavvio automatico in caso di crash). **Non avvia il servizio**: per quello serve `sc.exe start`.
-   Se Defender o SmartScreen bloccano l'exe (non firmato), aggiungi un'eccezione per quel file. La firma arriva con la M4.
+   L'install fa l'enrollment e salva segreti, password del repository e chiave S3 con DPAPI. Poi copia l'exe in `C:\ProgramData\Dupli\versions\<ver>\` e come Launcher in `C:\Program Files\Dupli\Launcher\`, restringe l'ACL di `C:\ProgramData\Dupli` (SYSTEM e Administrators, Users in sola lettura) e registra il servizio `DupliAgent` (LocalSystem, avvio automatico, riavvio automatico in caso di crash) che esegue `dupli-agent.exe launch`. **Non avvia il servizio**: per quello serve `sc.exe start`.
+   Se Defender o SmartScreen bloccano l'exe (non firmato), aggiungi un'eccezione per quel file. Con un certificato di firma: aggiungi `--require-signature --signer-thumbprint <thumbprint>` e l'agent accetterà solo aggiornamenti firmati da quel certificato.
 3. Se farai backup PostgreSQL, salva la password del DB con lo stesso nome che userai nella policy (campo *Password secret*, es. `pg-main`):
    ```powershell
-   $exe = "C:\ProgramData\Dupli\versions\0.1.0.0\dupli-agent.exe"
+   $exe = "C:\Program Files\Dupli\Launcher\dupli-agent.exe"
    $p = Read-Host "Password PostgreSQL" -AsSecureString
    [Net.NetworkCredential]::new('', $p).Password | & $exe secret set pg-main
    ```
 4. Entro circa 30 secondi, nella UI l'agent passa a **Active / online** con hostname, OS, versione e spazio disco. Nella tab *Logs* compaiono i log caricati dall'agent.
-   Log locali: `C:\ProgramData\Dupli\logs\`. Stato del servizio: `sc.exe query DupliAgent`.
+   Log locali: `C:\ProgramData\Dupli\logs\` (`agent-*.json` e `launcher-*.json`). Stato del servizio: `sc.exe query DupliAgent`.
 
 ---
 
@@ -419,10 +419,12 @@ Procedura:
 ## 14. Operatività
 
 - **Aggiornare il server:** push su `main`, poi `az containerapp update -g $RG -n $APP --image ghcr.io/azetaufficio/dupli-server:sha-<nuovo>`. Le migrazioni DB girano da sole all'avvio. Con 1 replica e revision singola c'è qualche secondo di indisponibilità: agli agent va bene, ritentano.
-- **Aggiornare l'agent:** per ora a mano, finché la M4 non porta l'updater:
-  1. `sc.exe stop DupliAgent`;
-  2. `.\dupli-agent.exe install --server ... --token <nuovo token>` con il nuovo exe (serve un nuovo token);
-  3. oppure sostituisci l'exe nel percorso registrato dal servizio.
+- **Aggiornare l'agent:** da remoto.
+  1. Pubblica la release: `git tag v0.2.0 && git push origin v0.2.0`. Il workflow *Release* crea la GitHub Release con gli exe e i `.sha256`.
+  2. UI → *Releases* → *Import from GitHub* (versione `0.2.0`, canale `beta` o `stable`), oppure registra a mano URL e sha256. Il server fa da mirror dell'exe.
+  3. Gli agent del canale (o con la versione fissata nella tab *Updates* dell'agent) scaricano la release quando sono inattivi, verificano lo sha256 e passano la mano al Launcher. Se la nuova versione crasha o non risponde entro 5 minuti, il Launcher torna alla precedente, l'agent lo segnala e parte l'alert *AgentUpdateFailed*. Quella versione non viene più ritentata su quella VM.
+  4. restic si aggiorna allo stesso modo: rendi corrente una nuova release restic; l'agent la installa e la prova sul repository prima di usarla.
+  5. Il Launcher stesso non si aggiorna da solo: per aggiornarlo, lancia sulla VM `dupli-agent.exe install` (senza token) con l'exe nuovo. Ferma e riavvia il servizio da solo.
 - **Rinnovo segreti:** client secret Entra (scadenza impostata al punto 6), secret del mailer, password PG. Si aggiornano con `az containerapp secret set` e poi `az containerapp revision restart`.
 - **Backup da fare fuori da Dupli:** DB PostgreSQL (backup automatici Azure) **e** key ring (copia dei `key-*.xml`). Il DB senza key ring non basta per recuperare le password dei repository. Tieni comunque nel vault anche le password dei repository restic delle VM critiche.
 - **Rimozione agent da una VM:** `& $exe uninstall` (ferma ed elimina il servizio), poi *Disable* nella UI.

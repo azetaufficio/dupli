@@ -1,5 +1,6 @@
 using Dupli.Agent.Configuration;
 using Dupli.Agent.Hosting;
+using Dupli.Agent.Launcher;
 using System.CommandLine;
 
 namespace Dupli.Agent.Cli;
@@ -19,6 +20,8 @@ public static class AgentCli
         root.Options.Add(HomeOption);
 
         root.Subcommands.Add(RunCommand());
+        root.Subcommands.Add(LaunchCommand());
+        root.Subcommands.Add(VersionCommand());
         root.Subcommands.Add(BackupCommand());
         root.Subcommands.Add(SnapshotsCommand());
         root.Subcommands.Add(RestoreCommand());
@@ -40,6 +43,24 @@ public static class AgentCli
     {
         var command = new Command("run", "Runs the agent service loop (server polling, or local policies when not enrolled).");
         command.SetAction((parseResult, ct) => AgentServiceHost.RunAsync(Paths(parseResult), ct));
+        return command;
+    }
+
+    private static Command LaunchCommand()
+    {
+        var command = new Command("launch", "Runs the Launcher (what the service runs): supervises the agent, applies updates, rolls back.");
+        command.SetAction((parseResult, ct) => LauncherHost.RunAsync(Paths(parseResult), ct));
+        return command;
+    }
+
+    private static Command VersionCommand()
+    {
+        var command = new Command("version", "Prints the agent version.");
+        command.SetAction(_ =>
+        {
+            Console.WriteLine(AgentVersion.Current);
+            return 0;
+        });
         return command;
     }
 
@@ -127,19 +148,36 @@ public static class AgentCli
 
     private static Command InstallCommand()
     {
-        var server = new Option<string>("--server") { Description = "Management server URL.", Required = true };
-        var token = new Option<string>("--token") { Description = "Single-use enrollment token.", Required = true };
+        var server = new Option<string?>("--server") { Description = "Management server URL (with --token)." };
+        var token = new Option<string?>("--token") { Description = "Single-use enrollment token. Without it, an enrolled machine is repaired/upgraded in place." };
+        var requireSignature = new Option<bool>("--require-signature") { Description = "Accept only Authenticode-signed agent updates." };
+        var signer = new Option<string[]>("--signer-thumbprint") { Description = "Accepted signer certificate thumbprint (repeatable)." };
 
-        var command = new Command("install", "Enrolls with the server and installs the agent as a Windows service.") { server, token };
+        var command = new Command("install",
+            "Enrolls with the server and installs the Launcher service. Without --token: reinstalls binaries, Launcher and service of an enrolled machine.")
+        {
+            server, token, requireSignature, signer,
+        };
+        command.Validators.Add(result =>
+        {
+            if (result.GetValue(token) is not null && result.GetValue(server) is null)
+                result.AddError("--token requires --server");
+        });
         command.SetAction((parseResult, ct) => Commands.InstallAsync(
-            Paths(parseResult), parseResult.GetRequiredValue(server), parseResult.GetRequiredValue(token), ct));
+            Paths(parseResult),
+            parseResult.GetValue(server),
+            parseResult.GetValue(token),
+            parseResult.GetValue(requireSignature) || (parseResult.GetValue(signer)?.Length ?? 0) > 0
+                ? new UpdateConfig { RequireSignature = true, SignerThumbprints = parseResult.GetValue(signer) ?? [] }
+                : null,
+            ct));
         return command;
     }
 
     private static Command UninstallCommand()
     {
-        var command = new Command("uninstall", "Removes the Windows service.");
-        command.SetAction((_, ct) => Commands.UninstallAsync(ct));
+        var command = new Command("uninstall", "Removes the service and the Launcher. Data in the agent home is kept.");
+        command.SetAction((parseResult, ct) => Commands.UninstallAsync(Paths(parseResult), ct));
         return command;
     }
 }

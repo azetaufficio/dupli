@@ -22,6 +22,7 @@ public sealed class DupliServerOptions
     public AlertOptions Alerts { get; set; } = new();
     public AdminOptions Admin { get; set; } = new();
     public AuthOptions Auth { get; set; } = new();
+    public ReleaseOptions Releases { get; set; } = new();
 }
 
 public sealed class AgentOptions
@@ -100,6 +101,19 @@ public sealed class AuthOptions
     /// <summary>Idle lifetime of the operator session cookie (sliding).</summary>
     public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(8);
     public string DevelopmentUser { get; set; } = "developer";
+}
+
+/// <summary>Where mirrored release sources may come from and where "import from GitHub" looks.</summary>
+public sealed class ReleaseOptions
+{
+    /// <summary>
+    /// Dev/test only: when true, a release <c>sourceUrl</c> may be <c>http://</c> or <c>file://</c> (still
+    /// sha256-verified). Production keeps https only.
+    /// </summary>
+    public bool AllowInsecureSources { get; set; }
+
+    /// <summary><c>owner/repo</c> whose GitHub Releases carry agent build assets.</summary>
+    public string GitHubRepository { get; set; } = "azetaufficio/dupli";
 }
 
 public sealed class EntraIdOptions

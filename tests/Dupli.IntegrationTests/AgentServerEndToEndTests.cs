@@ -7,7 +7,10 @@ using Dupli.Agent.Cli;
 using Dupli.Agent.Configuration;
 using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Secrets;
+using Dupli.Agent.Launcher;
 using Dupli.Agent.Server;
+using Dupli.Agent.Updates;
+using Dupli.Contracts.Agents;
 using Dupli.Contracts;
 using Dupli.Contracts.Jobs;
 using Dupli.Contracts.Policies;
@@ -182,16 +185,111 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         Assert.Single(await runtime.Engine.ListSnapshotsAsync(runtime.Repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None));
     }
 
+    [SkippableFact]
+    public async Task Agent_stages_the_release_desired_by_the_server_and_reports_a_rollback()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "The fake agent package is a shell script");
+
+        var admin = _server.CreateClient();
+        admin.DefaultRequestHeaders.Add(AuthConstants.AdminKeyHeader, AdminKey);
+        var (agentId, paths, secrets, config) = await EnrollAgentAsync(admin, "vm-update");
+
+        // A "new agent build" that only answers `version`; published from a local file (AllowInsecureSources).
+        const string newVersion = "9.9.9";
+        var package = Path.Combine(_root, "dupli-agent_9.9.9");
+        await File.WriteAllTextAsync(package, $"#!/bin/sh\necho {newVersion}\n");
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(package, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var sha = VersionFiles.Sha256Of(package);
+        await Read<ReleaseDto>(await admin.PostAsJsonAsync("/api/admin/releases/agent", new CreateAgentReleaseRequest(
+            newVersion, ResticPlatform.Current, "stable", new Uri(package).AbsoluteUri, sha), DupliJson.Options));
+
+        var files = new VersionFiles(paths);
+        var (loop, _, _) = CreateAgent(paths, config, secrets, withUpdates: true);
+        await loop.RunOnceAsync(CancellationToken.None);
+
+        // Downloaded through the server mirror, verified, staged; the process hands over to the Launcher.
+        Assert.Equal(1, _restarter.UpdateExits);
+        var pending = files.ReadPending()!;
+        Assert.Equal(newVersion, pending.Version);
+        Assert.Equal(sha, pending.Sha256);
+        Assert.Equal(sha, VersionFiles.Sha256Of(pending.ExePath));
+
+        var status = await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"));
+        Assert.Equal(newVersion, status.DesiredAgentVersion);
+        Assert.True(status.LauncherManaged);
+        Assert.Equal(ResticPlatform.Current, status.Platform);
+
+        // The Launcher rolled 9.9.9 back: the agent reports it and does not try again.
+        files.DeletePending();
+        files.WriteUpdateState(new UpdateStateFile
+        {
+            Last = new UpdateStatusDto { Version = newVersion, Outcome = UpdateOutcome.RolledBack, Error = "exited with code 1 during probation", At = DateTimeOffset.UtcNow },
+            FailedVersions = [newVersion],
+        });
+        var (restarted, _, _) = CreateAgent(paths, config, secrets, withUpdates: true);
+        await restarted.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, _restarter.UpdateExits);
+        Assert.Null(files.ReadPending());
+        status = await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"));
+        Assert.Equal("RolledBack", status.LastUpdateOutcome?.ToString());
+        Assert.Equal(newVersion, status.LastUpdateVersion);
+        Assert.Contains("probation", status.LastUpdateError);
+    }
+
+    /// <summary>Operator creates storage target + agent + token (and the host's restic release); the agent enrolls.</summary>
+    private async Task<(Guid AgentId, AgentPaths Paths, MemorySecretStore Secrets, AgentConfig Config)> EnrollAgentAsync(HttpClient admin, string name)
+    {
+        var storage = await Read<StorageTargetDto>(await admin.PostAsJsonAsync("/api/admin/storage-targets",
+            new CreateStorageTargetRequest("rustfs-" + name, S3Endpoint, "backups", "us-east-1"), DupliJson.Options));
+        var agent = await Read<AgentDto>(await admin.PostAsJsonAsync("/api/admin/agents", new CreateAgentRequest
+        {
+            Name = name, StorageTargetId = storage.Id, StoragePrefix = "agents/" + name,
+            S3AccessKeyId = S3AccessKey, S3SecretAccessKey = S3SecretKey,
+        }, DupliJson.Options));
+        var token = await Read<EnrollmentTokenDto>(await admin.PostAsync($"/api/admin/agents/{agent.Id}/enrollment-tokens", null));
+
+        var (asset, assetSha) = ResticAssets[RuntimeInformation.RuntimeIdentifier];
+        var release = await admin.PostAsJsonAsync("/api/admin/releases/restic", new CreateReleaseRequest(
+            ResticVersion, ResticPlatform.Current, $"https://github.com/restic/restic/releases/download/v{ResticVersion}/{asset}", assetSha),
+            DupliJson.Options);
+        Assert.True(release.IsSuccessStatusCode || release.StatusCode == System.Net.HttpStatusCode.Conflict, await release.Content.ReadAsStringAsync());
+
+        var paths = new AgentPaths(Path.Combine(_root, name));
+        var secrets = new MemorySecretStore();
+        var enrolled = await AgentEnrollment.EnrollAsync("http://localhost", token.Token, paths, secrets,
+            _server.CreateClient(), NullLogger.Instance, CancellationToken.None);
+        return (agent.Id, paths, secrets, enrolled with { ResticManifest = LocalResticManifest() });
+    }
+
     private readonly CountingRestarter _restarter = new();
 
-    private (ServerAgentLoop Loop, AgentRuntime Runtime, JobLedger Ledger) CreateAgent(AgentPaths paths, AgentConfig config, ISecretStore secrets)
+    private (ServerAgentLoop Loop, AgentRuntime Runtime, JobLedger Ledger) CreateAgent(
+        AgentPaths paths, AgentConfig config, ISecretStore secrets, bool withUpdates = false)
     {
         var runtime = AgentRuntimeFactory.Build(paths, config, _loggers, TimeProvider.System, secrets);
         var ledger = new JobLedger(paths.LedgerFile);
         var executor = new JobExecutor(runtime, ledger, TimeProvider.System, _loggers.CreateLogger<JobExecutor>());
+        var updates = withUpdates ? CreateUpdates(paths, runtime) : null;
         var loop = new ServerAgentLoop(CreateClient(config, secrets), ledger, executor, config, paths, TimeProvider.System,
-            _restarter, _loggers.CreateLogger<ServerAgentLoop>());
+            _restarter, _loggers.CreateLogger<ServerAgentLoop>(), updates);
         return (loop, runtime, ledger);
+    }
+
+    /// <summary>Same wiring as the agent host, with the agent HTTP pointing at the in-process server.</summary>
+    private AgentUpdates CreateUpdates(AgentPaths paths, AgentRuntime runtime)
+    {
+        var files = new VersionFiles(paths);
+        var agentUpdater = new AgentUpdater(files, paths, _server.CreateClient(), runtime.Processes,
+            new AuthenticodeVerifier(new UpdateConfig()), TimeProvider.System, _loggers.CreateLogger<AgentUpdater>())
+        {
+            LauncherManagedOverride = true,
+        };
+        var resticUpdater = new ResticUpdater(runtime.Restic, runtime.ResticTools, runtime.Repository, paths, runtime.Processes,
+            TimeProvider.System, _loggers);
+        return new AgentUpdates(agentUpdater, resticUpdater, runtime.Restic, files,
+            new LauncherHealthReporter(files, TimeProvider.System, _loggers.CreateLogger<LauncherHealthReporter>()));
     }
 
     private ServerClient CreateClient(AgentConfig config, ISecretStore secrets) =>
@@ -225,14 +323,18 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
             builder.UseSetting("Dupli:DataProtectionKeysPath", Path.Combine(dataDir, "keys"));
             builder.UseSetting("Dupli:ToolMirrorPath", Path.Combine(dataDir, "tools"));
             builder.UseSetting("Dupli:Admin:ApiKey", AdminKey);
+            builder.UseSetting("Dupli:Releases:AllowInsecureSources", "true");
         }
     }
 
     private sealed class CountingRestarter : IAgentRestarter
     {
         public int Restarts { get; private set; }
+        public int UpdateExits { get; private set; }
 
         public void Restart() => Restarts++;
+
+        public void ExitForUpdate() => UpdateExits++;
     }
 
     private sealed class MemorySecretStore : ISecretStore

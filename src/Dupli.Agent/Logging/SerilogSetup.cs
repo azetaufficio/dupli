@@ -10,7 +10,7 @@ public static class SerilogSetup
 {
     /// <summary>Rolling JSON file in <c>logs\</c> + console. AgentId is a constant enricher;
     /// JobId/PolicyId/SourceId/RunId are pushed per execution via <see cref="LogContext"/>.</summary>
-    public static Logger CreateLogger(AgentPaths paths, string agentName, ILogEventSink? serverSink = null)
+    public static Logger CreateLogger(AgentPaths paths, string agentName, ILogEventSink? serverSink = null, string filePrefix = "agent")
     {
         paths.EnsureCreated();
         var configuration = new LoggerConfiguration()
@@ -20,7 +20,7 @@ public static class SerilogSetup
             .WriteTo.Console()
             .WriteTo.File(
                 new Serilog.Formatting.Compact.CompactJsonFormatter(),
-                Path.Combine(paths.Logs, "agent-.json"),
+                Path.Combine(paths.Logs, $"{filePrefix}-.json"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 30);
         if (serverSink is not null)

@@ -2,11 +2,11 @@
 
 Central control plane for backing up Windows VMs (folders and PostgreSQL databases) to S3-compatible storage, built on [restic](https://restic.net) and .NET 10.
 
-> **Status:** early development. Milestones M1 (agent), M2 (management API) and M3 (web UI) are implemented; not yet validated on production Windows VMs. See `docs/plan-m1-m3.md`.
+> **Status:** early development. Milestones M1 (agent), M2 (management API), M3 (web UI) and M4 (remote updates with rollback) are implemented; not yet validated on production Windows VMs. See `docs/plan-m1-m3.md` and `docs/plan-m4.md`.
 
 ## Components
 
-- **Agent** (`src/Dupli.Agent`): Windows service and CLI, published as a single-file exe. It runs backup policies on a schedule and keeps secrets encrypted with DPAPI.
+- **Agent** (`src/Dupli.Agent`): Windows service and CLI, published as a single-file exe. It runs backup policies on a schedule and keeps secrets encrypted with DPAPI. The service runs the same exe as **Launcher** (`launch`), which supervises the agent process, switches to a new version staged by the agent and rolls back when the new version crashes or does not report healthy within 5 minutes.
 - **Agent.Core** (`src/Dupli.Agent.Core`): cross-platform backup engine. It includes the restic wrapper, a tool manager that downloads a pinned restic build and verifies its SHA-256, streaming `pg_dump` via `restic backup --stdin-from-command`, and error classification with retries.
 - **Contracts** (`src/Dupli.Contracts`): DTOs shared between agent and server.
 - **Server** (`src/Dupli.Server`, `.Domain`, `.Infrastructure`): ASP.NET Core control plane on PostgreSQL. Agents enroll with a one-time token and poll for typed jobs (backup, retention, repository check, restore test, restart); the server schedules them (cron + time zone), tracks leases/timeouts, escrows repository passwords and S3 keys, mirrors the pinned restic build and raises alerts by e-mail.
@@ -20,18 +20,23 @@ Design choices:
 ## Agent CLI
 
 ```
-dupli-agent run                                   # run as service / foreground scheduler
+dupli-agent launch                                # what the service runs: Launcher supervising `run`
+dupli-agent run                                   # agent process (server polling or local scheduler)
+dupli-agent version
 dupli-agent backup --policy <id>
 dupli-agent snapshots [--tag k=v]
 dupli-agent restore --snapshot <id> [--target <dir>] [--include <path>]
 dupli-agent forget --policy <id> [--prune]
 dupli-agent check [--subset 5%]
 dupli-agent secret set <name>                     # value read from stdin
-dupli-agent install --server <url> --token <t>
+dupli-agent install --server <url> --token <t> [--require-signature] [--signer-thumbprint <sha1>]
+dupli-agent install                               # enrolled machine: reinstall binaries, Launcher and service
 dupli-agent uninstall
 ```
 
-The data root is `%ProgramData%\Dupli`, and you can override it with `DUPLI_HOME`. The configuration lives in `config\agent.json`.
+The data root is `%ProgramData%\Dupli`, and you can override it with `DUPLI_HOME`. The configuration lives in `config\agent.json`; agent versions live side by side in `versions\<ver>\` and `versions\current.json` says which one the Launcher starts. The Launcher itself is a copy in `%ProgramFiles%\Dupli\Launcher`.
+
+Updates: the server tells each agent, in the heartbeat response, which agent and restic release it should run (release channel `dev`/`beta`/`stable` or a pinned version). The agent downloads it while idle, checks its SHA-256 (and, with `--require-signature`, its Authenticode signature), and hands over to the Launcher. Releases are published by tagging `vX.Y.Z` (`.github/workflows/release.yml`) and registered on the server from the *Releases* page.
 
 ## Server
 
@@ -61,7 +66,7 @@ ASPIRE_ALLOW_UNSECURED_TRANSPORT=true dotnet run --project src/Dupli.AppHost --l
 | `web` | Angular dev server on http://localhost:4200 |
 | `agent` | Linux container (`deploy/agent/Dockerfile`) running the agent |
 
-On first start the agent container registers itself through the admin API, enrolls, creates a `demo` policy (sample files + PostgreSQL) and queues a backup. Restarting via the UI works too: the container's entrypoint restarts the agent on exit code 75, as the Windows service recovery does. Everything is ephemeral: each run starts from an empty database and bucket. The Linux agent is a test vehicle only. On Linux, secrets are protected by file permissions (0600), not DPAPI, and enrollment over plain HTTP needs `DUPLI_ALLOW_INSECURE_HTTP=true`.
+On first start the agent container registers itself through the admin API, enrolls, creates a `demo` policy (sample files + PostgreSQL) and queues a backup. The container runs the same Launcher as the Windows service, so restart, update and rollback work as on Windows. Everything is ephemeral: each run starts from an empty database and bucket. The Linux agent is a test vehicle only. On Linux, secrets are protected by file permissions (0600), not DPAPI, and enrollment over plain HTTP needs `DUPLI_ALLOW_INSECURE_HTTP=true`.
 
 ## Build and test
 

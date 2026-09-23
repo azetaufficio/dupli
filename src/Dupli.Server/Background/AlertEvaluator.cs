@@ -1,9 +1,11 @@
+using Dupli.Contracts.Agents;
 using Dupli.Contracts.Jobs;
 using Dupli.Server.Configuration;
 using Dupli.Server.Domain.Agents;
 using Dupli.Server.Domain.Jobs;
 using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Infrastructure.Database;
+using Dupli.Server.Tools;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -18,6 +20,7 @@ public sealed class AlertEvaluator(
     DupliDbContext db,
     INotificationChannel channel,
     IOptions<DupliServerOptions> options,
+    DesiredVersionResolver desiredVersions,
     TimeProvider time,
     ILogger<AlertEvaluator> logger) : IPeriodicTask
 {
@@ -92,12 +95,21 @@ public sealed class AlertEvaluator(
         var conditions = new List<Condition>();
 
         var agents = await db.Agents.AsNoTracking().Where(a => a.Status == AgentStatus.Active).ToListAsync(ct);
+        var desiredByAgent = await desiredVersions.ResolveManyAsync(agents, ct); // one releases query for the whole batch
         foreach (var agent in agents)
         {
             var lastSeen = agent.LastHeartbeatAt ?? agent.EnrolledAt ?? agent.CreatedAt;
             if (now - lastSeen > o.Agents.OfflineAfter)
                 conditions.Add(new Condition(AlertKind.AgentOffline, $"agent:{agent.Id}", agent.Id, null,
                     $"Agent {agent.Name} ({agent.Hostname}) has not sent a heartbeat since {lastSeen:u}."));
+
+            // Rolled back to the version it was on before, still on the version the server wants: the Launcher
+            // gave up and needs an operator (a new pin/channel, or a fixed release).
+            var desiredAgentVersion = desiredByAgent[agent.Id].Agent?.Version;
+            if (agent.LastUpdateOutcome == nameof(UpdateOutcome.RolledBack) && desiredAgentVersion is not null
+                && agent.LastUpdateVersion == desiredAgentVersion && agent.Version != desiredAgentVersion)
+                conditions.Add(new Condition(AlertKind.AgentUpdateFailed, $"agent:{agent.Id}", agent.Id, null,
+                    $"Agent {agent.Name} failed to update to {agent.LastUpdateVersion} and was rolled back to {agent.Version}: {agent.LastUpdateError}"));
 
             var lastCheck = await LatestFinishedAsync(agent.Id, null, JobType.RepositoryCheck, ct);
             if (lastCheck is { State: JobState.Failed or JobState.TimedOut })

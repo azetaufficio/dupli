@@ -2,6 +2,7 @@ import { httpResource } from '@angular/common/http';
 import { Component, DestroyRef, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Dashboard } from '../core/models';
+import { agentUpdateStatus } from '../shared/agent-update-status';
 import { Badge } from '../shared/badge';
 import { DateTimePipe, RelativeTimePipe } from '../shared/format';
 
@@ -89,7 +90,10 @@ const REFRESH_MS = 15_000;
                         <app-badge [value]="row.agent.status" />
                       }
                     </td>
-                    <td class="mono">{{ row.agent.version ?? '—' }}</td>
+                    <td class="nowrap">
+                      <span class="mono">{{ row.agent.version ?? '—' }}</span>
+                      <app-badge [value]="agentUpdateStatus(row.agent)" />
+                    </td>
                     <td class="mono">{{ row.agent.resticVersion ?? '—' }}</td>
                     <td class="nowrap" [title]="row.agent.lastHeartbeatAt | datetime">
                       {{ row.agent.lastHeartbeatAt | relative }}
@@ -131,6 +135,8 @@ const REFRESH_MS = 15_000;
   `,
 })
 export class DashboardPage {
+  protected readonly agentUpdateStatus = agentUpdateStatus;
+
   protected readonly dashboard = httpResource<Dashboard>(() => '/api/admin/dashboard');
 
   constructor() {

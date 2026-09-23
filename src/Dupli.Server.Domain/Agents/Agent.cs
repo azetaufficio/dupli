@@ -24,6 +24,30 @@ public sealed class Agent
     public DateTimeOffset? LastBackupAt { get; set; }
     public long? FreeDiskSpace { get; set; }
 
+    /// <summary>Release platform (<c>windows_amd64</c>, <c>linux_amd64</c>, <c>linux_arm64</c>).</summary>
+    public string Platform { get; set; } = "windows_amd64";
+
+    /// <summary>Update channel: <c>dev</c>, <c>beta</c> or <c>stable</c> (default).</summary>
+    public string Channel { get; set; } = "stable";
+
+    /// <summary>Forces a specific agent version regardless of channel. Downgrade allowed.</summary>
+    public string? PinnedAgentVersion { get; set; }
+
+    /// <summary>Forces a specific restic version regardless of the current release.</summary>
+    public string? PinnedResticVersion { get; set; }
+
+    /// <summary>True when the process is supervised by the Launcher, i.e. it can apply updates.</summary>
+    public bool LauncherManaged { get; set; }
+
+    /// <summary>Outcome (<c>UpdateOutcome</c> name) of the last agent update attempted by the Launcher.</summary>
+    public string? LastUpdateOutcome { get; set; }
+    public string? LastUpdateVersion { get; set; }
+    public string? LastUpdateError { get; set; }
+    public DateTimeOffset? LastUpdateAt { get; set; }
+
+    /// <summary>Why the desired restic version could not be activated (null when active or not attempted).</summary>
+    public string? ResticUpdateError { get; set; }
+
     /// <summary>SHA-256 (hex) of the high-entropy agent secret. The secret itself is never stored.</summary>
     public string? SecretHash { get; set; }
     public DateTimeOffset? SecretRotatedAt { get; set; }

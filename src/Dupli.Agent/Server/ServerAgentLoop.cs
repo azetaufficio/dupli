@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Dupli.Agent.Configuration;
 using Dupli.Agent.Logging;
+using Dupli.Agent.Updates;
 using Dupli.Contracts.Agents;
 using Dupli.Contracts.Jobs;
 using Microsoft.Extensions.Hosting;
@@ -20,10 +21,10 @@ public sealed class ServerAgentLoop(
     AgentPaths paths,
     TimeProvider time,
     IAgentRestarter restarter,
-    ILogger<ServerAgentLoop> logger) : BackgroundService
+    ILogger<ServerAgentLoop> logger,
+    AgentUpdates? updates = null) : BackgroundService
 {
-    public static readonly string AgentVersion = typeof(ServerAgentLoop).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-
+    private HeartbeatResponse? _desired;
     private TimeSpan _pollInterval = TimeSpan.FromSeconds(Math.Max(5, config.Server?.PollIntervalSeconds ?? 30));
     private bool _recovered;
 
@@ -40,6 +41,7 @@ public sealed class ServerAgentLoop(
             try
             {
                 await RunOnceAsync(stoppingToken);
+                updates?.ReportHealthy();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -49,6 +51,10 @@ public sealed class ServerAgentLoop(
             {
                 // Server unreachable etc.: already retried inside the client; try again next cycle.
                 logger.LogWarning(ex, "Poll cycle failed");
+
+                // The agent itself works, the server is not reachable: must not roll back a fresh update.
+                if (IsServerUnavailable(ex))
+                    updates?.ReportHealthy();
             }
 
             try
@@ -83,7 +89,19 @@ public sealed class ServerAgentLoop(
             }
             await RunJobAsync(job, ct);
         }
+
+        // Idle here (jobs run one at a time, inline): safe to swap restic or hand over to a new agent version.
+        if (updates is not null && _desired is not null && await updates.ApplyAsync(_desired, ct))
+            restarter.ExitForUpdate();
     }
+
+    internal static bool IsServerUnavailable(Exception ex) => ex switch
+    {
+        HttpRequestException http => http.StatusCode is null || (int)http.StatusCode >= 500,
+        TimeoutException => true,
+        TaskCanceledException { InnerException: TimeoutException } => true,
+        _ => false,
+    };
 
     private void RecoverInterrupted()
     {
@@ -121,16 +139,18 @@ public sealed class ServerAgentLoop(
 
     private async Task HeartbeatAsync(CancellationToken ct)
     {
-        var response = await server.HeartbeatAsync(new HeartbeatRequest
+        var request = new HeartbeatRequest
         {
             Hostname = Environment.MachineName,
-            Version = AgentVersion,
+            Version = AgentVersion.Current,
             ResticVersion = config.ResticManifest.Version,
             OsVersion = RuntimeInformation.OSDescription,
             LastBackupAt = ledger.LastSuccessfulBackupAt(),
             RunningJobs = ledger.RunningJobIds(),
             FreeDiskSpace = FreeDiskSpace(),
-        }, ct);
+        };
+        var response = await server.HeartbeatAsync(updates?.Describe(request) ?? request, ct);
+        _desired = response;
         _pollInterval = TimeSpan.FromSeconds(Math.Max(5, response.PollIntervalSeconds));
     }
 

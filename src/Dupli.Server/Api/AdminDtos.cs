@@ -41,7 +41,22 @@ public sealed record AgentDto(
     Guid StorageTargetId,
     string StoragePrefix,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? EnrolledAt);
+    DateTimeOffset? EnrolledAt,
+    string Platform,
+    string Channel,
+    string? PinnedAgentVersion,
+    string? PinnedResticVersion,
+    bool LauncherManaged,
+    string? DesiredAgentVersion,
+    string? DesiredResticVersion,
+    string? LastUpdateVersion,
+    string? LastUpdateOutcome,
+    string? LastUpdateError,
+    DateTimeOffset? LastUpdateAt,
+    string? ResticUpdateError);
+
+/// <summary>Channel/pins an operator can change from the UI.</summary>
+public sealed record UpdateAgentSettingsRequest(string Channel, string? PinnedAgentVersion, string? PinnedResticVersion);
 
 public sealed record EnrollmentTokenDto(string Token, DateTimeOffset ExpiresAt);
 
@@ -118,6 +133,13 @@ public sealed record AlertDto(
     DateTimeOffset? ResolvedAt);
 
 public sealed record CreateReleaseRequest(string Version, string Platform, string SourceUrl, string Sha256, bool MakeCurrent = true);
+
+public sealed record CreateAgentReleaseRequest(string Version, string Platform, string Channel, string SourceUrl, string Sha256, bool MakeCurrent = true);
+
+public sealed record ImportAgentReleaseRequest(string Version, string Channel, bool MakeCurrent = true);
+
+public sealed record ReleaseDto(
+    Guid Id, string Product, string Version, string Platform, string? Channel, string SourceUrl, string Sha256, bool IsCurrent, DateTimeOffset CreatedAt);
 
 public sealed record DashboardDto(DashboardCountersDto Counters, IReadOnlyList<DashboardAgentDto> Agents);
 

@@ -20,6 +20,15 @@ public sealed class AgentPaths
     public string CurrentVersionFile => Path.Combine(Versions, "current.json");
     public string LedgerFile => Path.Combine(Config, "agent.db");
 
+    /// <summary>Active restic release after a restic update; overrides the manifest received at enrollment.</summary>
+    public string ResticStateFile => Path.Combine(Config, "restic.json");
+
+    /// <summary>
+    /// Stable copy of the executable run by the service as Launcher: <c>%ProgramFiles%\Dupli\Launcher</c> on Windows
+    /// (admin-only writable), <c>{root}/launcher</c> elsewhere.
+    /// </summary>
+    public string LauncherDirectory { get; }
+
     public AgentPaths(string? root = null)
     {
         Root = root ?? Environment.GetEnvironmentVariable("DUPLI_HOME") ?? DefaultRoot();
@@ -31,6 +40,9 @@ public sealed class AgentPaths
         Secrets = Path.Combine(Config, "secrets");
         Tmp = Path.Combine(Root, "tmp");
         Cache = Path.Combine(Root, "cache");
+        LauncherDirectory = OperatingSystem.IsWindows() && root is null && Environment.GetEnvironmentVariable("DUPLI_HOME") is null
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Dupli", "Launcher")
+            : Path.Combine(Root, "launcher");
     }
 
     /// <summary>Creates every well-known subdirectory (idempotent).</summary>

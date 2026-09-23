@@ -162,9 +162,32 @@ public sealed class ResticToolManager(
     }
 }
 
-/// <summary>Resolves the restic binary for a pinned manifest, installing it on first use.</summary>
-public sealed class ManagedResticBinaryProvider(IToolManager tools, ToolManifestDto manifest) : IResticBinaryProvider
+/// <summary>The restic release in use. Swapped atomically by a restic update; read at the start of each restic call.</summary>
+public sealed class ActiveResticManifest(ToolManifestDto initial)
 {
+    private volatile ToolManifestDto _current = initial;
+
+    public ToolManifestDto Current
+    {
+        get => _current;
+        set => _current = value;
+    }
+}
+
+/// <summary>Resolves the restic binary for the active pinned manifest, installing it on first use.</summary>
+public sealed class ManagedResticBinaryProvider(IToolManager tools, ActiveResticManifest manifest) : IResticBinaryProvider
+{
+    public ManagedResticBinaryProvider(IToolManager tools, ToolManifestDto manifest)
+        : this(tools, new ActiveResticManifest(manifest))
+    {
+    }
+
     public Task<string> GetPathAsync(CancellationToken cancellationToken) =>
-        tools.EnsureInstalledAsync(manifest, cancellationToken);
+        tools.EnsureInstalledAsync(manifest.Current, cancellationToken);
+}
+
+/// <summary>Always the same binary: used to probe a restic release before activating it.</summary>
+public sealed class FixedResticBinaryProvider(string path) : IResticBinaryProvider
+{
+    public Task<string> GetPathAsync(CancellationToken cancellationToken) => Task.FromResult(path);
 }

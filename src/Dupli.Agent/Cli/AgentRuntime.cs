@@ -20,7 +20,10 @@ public sealed record AgentRuntime(
     IBackupEngine Engine,
     RepositoryTarget Repository,
     PolicyRunner PolicyRunner,
-    RestoreTester RestoreTester);
+    RestoreTester RestoreTester,
+    ActiveResticManifest Restic,
+    ResticToolManager ResticTools,
+    IProcessRunner Processes);
 
 public static class AgentRuntimeFactory
 {
@@ -35,7 +38,9 @@ public static class AgentRuntimeFactory
         var processRunner = new ProcessRunner(loggerFactory.CreateLogger<ProcessRunner>());
         var toolManager = new ResticToolManager(
             paths.ResticTools, new HttpClient(), processRunner, loggerFactory.CreateLogger<ResticToolManager>());
-        var binaryProvider = new ManagedResticBinaryProvider(toolManager, config.ResticManifest);
+        // A restic update (config\restic.json) overrides the release received at enrollment.
+        var restic = new ActiveResticManifest(Updates.ResticUpdater.LoadPersisted(paths) ?? config.ResticManifest);
+        var binaryProvider = new ManagedResticBinaryProvider(toolManager, restic);
         IBackupEngine engine = new ResticBackupEngine(binaryProvider, processRunner, loggerFactory.CreateLogger<ResticBackupEngine>());
 
         IPostgresBinLocator binLocator = OperatingSystem.IsWindows()
@@ -51,6 +56,6 @@ public static class AgentRuntimeFactory
 
         var restoreTester = new RestoreTester(engine, binLocator, processRunner, loggerFactory.CreateLogger<RestoreTester>());
 
-        return new AgentRuntime(config, paths, secrets, engine, repository, policyRunner, restoreTester);
+        return new AgentRuntime(config, paths, secrets, engine, repository, policyRunner, restoreTester, restic, toolManager, processRunner);
     }
 }

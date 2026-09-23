@@ -1,0 +1,131 @@
+name: Release
+
+# Tag vX.Y.Z (or vX.Y.Z-beta.N) publishes the agent single-file executables + .sha256 on GitHub Releases and
+# the server image tagged with the version. Register the release on a server with
+# POST /api/admin/releases/agent/import {version, channel} (or from the "Releases" page of the UI).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Same rule as the agent (AgentVersion.IsValid): the version becomes a directory name.
+          echo "$version" | grep -Eq '^[0-9][0-9A-Za-z.-]{0,63}$' || { echo "Invalid tag $GITHUB_REF_NAME"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  agent:
+    name: Agent ${{ matrix.platform }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64, platform: windows_amd64, ext: .exe }
+          - { os: ubuntu-latest, rid: linux-x64, platform: linux_amd64, ext: '' }
+          - { os: ubuntu-latest, rid: linux-arm64, platform: linux_arm64, ext: '' }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ASSET: dupli-agent_${{ needs.version.outputs.version }}_${{ matrix.platform }}${{ matrix.ext }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish
+        shell: bash
+        run: >
+          dotnet publish src/Dupli.Agent/Dupli.Agent.csproj -c Release
+          -r ${{ matrix.rid }} --self-contained
+          -p:PublishSingleFile=true -p:Version="$VERSION"
+          -o publish
+
+      # Optional Authenticode signing (Azure Trusted Signing). Enabled by the repository variable
+      # DUPLI_SIGNING_ENABLED=true plus the AZURE_* secrets and TRUSTED_SIGNING_* variables.
+      - name: Sign
+        if: matrix.platform == 'windows_amd64' && vars.DUPLI_SIGNING_ENABLED == 'true'
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          files-folder: publish
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Check reported version
+        if: matrix.rid != 'linux-arm64'
+        shell: bash
+        run: test "$(./publish/dupli-agent${{ matrix.ext }} version)" = "$VERSION"
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir dist
+          cp "publish/dupli-agent${{ matrix.ext }}" "dist/$ASSET"
+          cd dist
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          cat "$ASSET.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist
+
+  release:
+    needs: [version, agent]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Dupli $VERSION" --generate-notes $prerelease
+
+  server-image:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: VERSION=${{ needs.version.outputs.version }}
+          tags: ghcr.io/azetaufficio/dupli-server:${{ needs.version.outputs.version }}

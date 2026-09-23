@@ -121,16 +121,16 @@ public static class Commands
         return 0;
     }
 
-    public static Task<int> InstallAsync(AgentPaths paths, string server, string token, CancellationToken ct)
+    public static async Task<int> InstallAsync(AgentPaths paths, string? server, string? token, UpdateConfig? update, CancellationToken ct)
     {
         using var logger = LoggerFactory.Create(b => b.AddConsole());
-        return AgentInstaller.InstallAsync(paths, server, token, logger.CreateLogger("install"), ct);
+        return await AgentInstaller.InstallAsync(paths, server, token, update, logger.CreateLogger("install"), ct);
     }
 
-    public static Task<int> UninstallAsync(CancellationToken ct)
+    public static async Task<int> UninstallAsync(AgentPaths paths, CancellationToken ct)
     {
         using var logger = LoggerFactory.Create(b => b.AddConsole());
-        return AgentInstaller.UninstallAsync(logger.CreateLogger("uninstall"), ct);
+        return await AgentInstaller.UninstallAsync(paths, logger.CreateLogger("uninstall"), ct);
     }
 
     private static ScheduledPolicy FindPolicy(AgentConfig config, string nameOrId) =>

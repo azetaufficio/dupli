@@ -1,7 +1,8 @@
 #!/bin/sh
 # Bootstrap for the Linux test agent: on first start it registers itself through the admin API (storage
 # target, agent, enrollment token), enrolls, stores the PostgreSQL password, creates a demo policy and
-# queues a first backup. Then it runs the agent in server mode.
+# queues a first backup. Then it runs the Launcher, which supervises the agent in server mode and applies
+# updates/rollbacks exactly as the Windows service does.
 set -eu
 
 : "${DUPLI_SERVER_URL:?}" "${DUPLI_ADMIN_KEY:?}" "${S3_ENDPOINT:?}" "${S3_ACCESS_KEY:?}" "${S3_SECRET_KEY:?}"
@@ -73,21 +74,12 @@ bootstrap() {
     fi
 }
 
-# Plays the role of the Windows service recovery actions: exit code 75 ("restart agent" job) restarts the
-# agent, any other exit ends the container. SIGTERM (container stop) is forwarded for a clean shutdown.
-run_agent() {
-    while :; do
-        dupli-agent run &
-        pid=$!
-        trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; exit 0' TERM INT
-        code=0
-        wait "$pid" || code=$?
-        [ "$code" -eq 75 ] || exit "$code"
-        echo "Agent requested a restart (exit 75): starting it again"
-    done
-}
-
 [ -d "$SAMPLE_DIR" ] || seed_sample_data
 [ -f "$DUPLI_HOME/config/agent.json" ] || bootstrap
+# Repair mode (no token): stages this image's binary and the Launcher when missing, e.g. for a home enrolled
+# by an older image. An update applied at run time lives in versions/ and survives container restarts.
+[ -x "$DUPLI_HOME/launcher/dupli-agent" ] || dupli-agent install
 
-run_agent
+# The Launcher restarts the agent on exit 75 (restart job) and switches versions on exit 76 (update).
+# SIGTERM (container stop) stops the Launcher, which closes the agent's stdin for a clean shutdown.
+exec "$DUPLI_HOME/launcher/dupli-agent" launch

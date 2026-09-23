@@ -13,7 +13,8 @@ WORKDIR /src
 COPY global.json Directory.Build.props ./
 COPY src/ src/
 COPY --from=web /src/src/Dupli.Server/wwwroot src/Dupli.Server/wwwroot
-RUN dotnet publish src/Dupli.Server/Dupli.Server.csproj -c Release -o /app --nologo
+ARG VERSION=0.1.0
+RUN dotnet publish src/Dupli.Server/Dupli.Server.csproj -c Release -p:Version=$VERSION -o /app --nologo
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app

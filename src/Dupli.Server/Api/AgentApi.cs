@@ -26,7 +26,10 @@ public static class AgentApi
         anonymous.MapPost("/agents/token", (AgentTokenRequest request, EnrollmentService enrollment, CancellationToken ct) =>
             enrollment.IssueTokenAsync(request, ct));
         anonymous.MapGet("/tools/restic/manifest", ManifestAsync);
-        anonymous.MapGet("/tools/restic/{version}/{platform}", DownloadAsync);
+        anonymous.MapGet("/tools/restic/{version}/{platform}", (string version, string platform, ReleaseMirror mirror, CancellationToken ct) =>
+            DownloadAsync(ReleaseMirror.ResticProduct, version, platform, mirror, ct));
+        anonymous.MapGet("/tools/agent/{version}/{platform}", (string version, string platform, ReleaseMirror mirror, CancellationToken ct) =>
+            DownloadAsync(ReleaseMirror.AgentProduct, version, platform, mirror, ct));
 
         var agent = app.MapGroup("/api").RequireAuthorization(AuthConstants.AgentPolicy);
         agent.MapPost("/agents/heartbeat", HeartbeatAsync);
@@ -55,21 +58,21 @@ public static class AgentApi
         enrollment.RegisterAsync(request, PublicBaseUrl(http, options.Value), ct);
 
     private static async Task<IResult> ManifestAsync(
-        HttpRequest http, ResticMirror mirror, IOptions<DupliServerOptions> options, CancellationToken ct, string? platform = null)
+        HttpRequest http, ReleaseMirror mirror, IOptions<DupliServerOptions> options, CancellationToken ct, string? platform = null)
     {
-        var manifest = await mirror.GetManifestAsync(platform ?? ResticMirror.DefaultPlatform, PublicBaseUrl(http, options.Value), ct);
+        var manifest = await mirror.GetManifestAsync(ReleaseMirror.ResticProduct, platform ?? ReleaseMirror.DefaultPlatform, PublicBaseUrl(http, options.Value), ct);
         return manifest is null ? Results.NotFound() : Results.Ok(manifest);
     }
 
-    private static async Task<IResult> DownloadAsync(string version, string platform, ResticMirror mirror, CancellationToken ct)
+    private static async Task<IResult> DownloadAsync(string product, string version, string platform, ReleaseMirror mirror, CancellationToken ct)
     {
-        var asset = await mirror.GetAssetAsync(version, platform, ct);
+        var asset = await mirror.GetAssetAsync(product, version, platform, ct);
         return asset is { } a ? Results.File(a.Path, "application/octet-stream", a.FileName) : Results.NotFound();
     }
 
     private static async Task<HeartbeatResponse> HeartbeatAsync(
         HeartbeatRequest request, HttpContext http, DupliDbContext db,
-        IOptions<DupliServerOptions> options, TimeProvider time, CancellationToken ct)
+        IOptions<DupliServerOptions> options, TimeProvider time, DesiredVersionResolver resolver, CancellationToken ct)
     {
         var agent = await db.Agents.FindAsync([http.User.AgentId()], ct) ?? throw ApiException.NotFound("Agent");
         var now = time.GetUtcNow();
@@ -79,9 +82,28 @@ public static class AgentApi
         agent.ResticVersion = request.ResticVersion ?? agent.ResticVersion;
         agent.OsVersion = request.OsVersion;
         agent.FreeDiskSpace = request.FreeDiskSpace;
+        if (!string.IsNullOrWhiteSpace(request.Platform))
+            agent.Platform = request.Platform;
+        agent.LauncherManaged = request.LauncherManaged;
+        if (request.LastUpdate is { } lastUpdate)
+        {
+            agent.LastUpdateVersion = lastUpdate.Version;
+            agent.LastUpdateOutcome = lastUpdate.Outcome.ToString();
+            agent.LastUpdateError = lastUpdate.Error;
+            agent.LastUpdateAt = lastUpdate.At;
+        }
+        agent.ResticUpdateError = request.ResticUpdateError;
         await db.SaveChangesAsync(ct);
 
-        return new HeartbeatResponse { ServerTime = now, PollIntervalSeconds = options.Value.Agents.PollIntervalSeconds };
+        var (desiredAgent, desiredRestic) = await resolver.ResolveAsync(agent, ct);
+        var publicBaseUrl = PublicBaseUrl(http.Request, options.Value);
+        return new HeartbeatResponse
+        {
+            ServerTime = now,
+            PollIntervalSeconds = options.Value.Agents.PollIntervalSeconds,
+            DesiredAgent = desiredAgent is null ? null : ReleaseMirror.ToManifest(desiredAgent, publicBaseUrl),
+            DesiredRestic = desiredRestic is null ? null : ReleaseMirror.ToManifest(desiredRestic, publicBaseUrl),
+        };
     }
 
     private static Task<IReadOnlyList<AgentJobDto>> JobsAsync(Guid agentId, HttpContext http, JobService jobs, CancellationToken ct)

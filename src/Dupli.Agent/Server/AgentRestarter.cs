@@ -1,3 +1,4 @@
+using Dupli.Agent.Launcher;
 using Serilog;
 
 namespace Dupli.Agent.Server;
@@ -5,19 +6,26 @@ namespace Dupli.Agent.Server;
 public interface IAgentRestarter
 {
     void Restart();
+
+    /// <summary>Hands over to the Launcher, which switches to the version staged in <c>pending.json</c>.</summary>
+    void ExitForUpdate();
 }
 
 /// <summary>
-/// Terminates the process with a non-zero exit code without a clean service stop: the service control
-/// manager treats it as a failure and applies the recovery action (restart) set at install time.
+/// Terminates the process with a non-zero exit code without a clean service stop: the Launcher (or, for an agent
+/// run directly as a service, the service control manager's recovery action) starts it again.
 /// </summary>
 public sealed class ProcessExitRestarter : IAgentRestarter
 {
-    public const int RestartExitCode = 75;
+    public const int RestartExitCode = LauncherSupervisor.RestartExitCode;
 
-    public void Restart()
+    public void Restart() => Exit(RestartExitCode);
+
+    public void ExitForUpdate() => Exit(LauncherSupervisor.UpdateExitCode);
+
+    private static void Exit(int code)
     {
         Log.CloseAndFlush();
-        Environment.Exit(RestartExitCode);
+        Environment.Exit(code);
     }
 }

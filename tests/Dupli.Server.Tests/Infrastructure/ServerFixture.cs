@@ -99,6 +99,9 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
+        // Npgsql keeps idle pooled connections open past disposal; with one database per test that adds up
+        // to the shared container's max_connections as the suite grows. Close this instance's pool right away.
+        Npgsql.NpgsqlConnection.ClearPool(new Npgsql.NpgsqlConnection(_connectionString));
         try { Directory.Delete(_dataDir, recursive: true); } catch (IOException) { }
     }
 }

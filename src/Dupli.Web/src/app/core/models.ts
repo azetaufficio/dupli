@@ -23,7 +23,20 @@ export type AlertKind =
   | 'BackupMissed'
   | 'BackupTooOld'
   | 'RepositoryCheckFailed'
-  | 'RestoreTestFailed';
+  | 'RestoreTestFailed'
+  | 'AgentUpdateFailed';
+
+export type AgentPlatform = 'windows_amd64' | 'linux_amd64' | 'linux_arm64';
+export type AgentChannel = 'dev' | 'beta' | 'stable';
+export type UpdateOutcome = 'Succeeded' | 'RolledBack';
+export type ReleaseProduct = 'agent' | 'restic';
+
+export const AGENT_PLATFORMS: readonly AgentPlatform[] = [
+  'windows_amd64',
+  'linux_amd64',
+  'linux_arm64',
+];
+export const AGENT_CHANNELS: readonly AgentChannel[] = ['dev', 'beta', 'stable'];
 
 export const TERMINAL_STATES: readonly JobState[] = [
   'Succeeded',
@@ -72,6 +85,24 @@ export interface Agent {
   storagePrefix: string;
   createdAt: string;
   enrolledAt: string | null;
+  platform: AgentPlatform;
+  channel: AgentChannel;
+  pinnedAgentVersion: string | null;
+  pinnedResticVersion: string | null;
+  launcherManaged: boolean;
+  desiredAgentVersion: string | null;
+  desiredResticVersion: string | null;
+  lastUpdateVersion: string | null;
+  lastUpdateOutcome: UpdateOutcome | null;
+  lastUpdateError: string | null;
+  lastUpdateAt: string | null;
+  resticUpdateError: string | null;
+}
+
+export interface UpdateAgentSettingsRequest {
+  channel: AgentChannel;
+  pinnedAgentVersion: string | null;
+  pinnedResticVersion: string | null;
 }
 
 export interface CreateAgentRequest {
@@ -219,6 +250,41 @@ export interface Alert {
   message: string;
   openedAt: string;
   resolvedAt: string | null;
+}
+
+export interface Release {
+  id: string;
+  product: ReleaseProduct;
+  version: string;
+  platform: AgentPlatform;
+  channel: AgentChannel | null;
+  sourceUrl: string;
+  sha256: string;
+  isCurrent: boolean;
+  createdAt: string;
+}
+
+export interface CreateReleaseRequest {
+  version: string;
+  platform: AgentPlatform;
+  sourceUrl: string;
+  sha256: string;
+  makeCurrent: boolean;
+}
+
+export interface CreateAgentReleaseRequest {
+  version: string;
+  platform: AgentPlatform;
+  channel: AgentChannel;
+  sourceUrl: string;
+  sha256: string;
+  makeCurrent: boolean;
+}
+
+export interface ImportAgentReleaseRequest {
+  version: string;
+  channel: AgentChannel;
+  makeCurrent: boolean;
 }
 
 export interface ProblemDetails {

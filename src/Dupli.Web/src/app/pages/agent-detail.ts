@@ -1,18 +1,23 @@
-import { httpResource } from '@angular/common/http';
-import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { HttpContext, httpResource } from '@angular/common/http';
+import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
+import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import {
   Agent,
+  AGENT_CHANNELS,
+  AgentChannel,
   Alert,
   EnrollmentToken,
   Job,
   LogEntry,
   Policy,
+  Release,
   Run,
   StorageTarget,
   SystemJobType,
+  UpdateAgentSettingsRequest,
 } from '../core/models';
 import { ToastService } from '../core/toast.service';
 import { Badge } from '../shared/badge';
@@ -20,7 +25,13 @@ import { ConfirmService } from '../shared/confirm';
 import { BytesPipe, DateTimePipe, DurationPipe, RelativeTimePipe } from '../shared/format';
 import { AlertsTable, ItemsTable, JobsTable, LogsTable, RunsTable, lookup } from '../shared/tables';
 
-type Tab = 'policies' | 'jobs' | 'history' | 'restore-tests' | 'logs' | 'alerts';
+type Tab = 'policies' | 'jobs' | 'history' | 'restore-tests' | 'logs' | 'alerts' | 'updates';
+
+interface UpdateSettingsForm {
+  channel: AgentChannel;
+  pinnedAgentVersion: string;
+  pinnedResticVersion: string;
+}
 
 const REFRESH_MS = 15_000;
 
@@ -191,6 +202,9 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         <button type="button" [class.active]="tab() === 'alerts'" (click)="tab.set('alerts')">
           Alerts<span class="count">{{ openAlertCount() }}</span>
         </button>
+        <button type="button" [class.active]="tab() === 'updates'" (click)="tab.set('updates')">
+          Updates
+        </button>
       </div>
 
       @switch (tab()) {
@@ -356,6 +370,102 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
             <app-alerts-table [alerts]="alerts.value() ?? []" />
           </section>
         }
+        @case ('updates') {
+          <section class="card">
+            <dl class="facts">
+              <div>
+                <dt>Platform</dt>
+                <dd class="mono">{{ a.platform }}</dd>
+              </div>
+              <div>
+                <dt>Launcher managed</dt>
+                <dd>
+                  <app-badge
+                    [value]="a.launcherManaged ? 'Active' : 'Disabled'"
+                    [text]="a.launcherManaged ? 'Yes' : 'No'"
+                  />
+                </dd>
+              </div>
+              <div>
+                <dt>Channel</dt>
+                <dd class="mono">{{ a.channel }}</dd>
+              </div>
+              <div>
+                <dt>Agent version (running / desired)</dt>
+                <dd class="mono">{{ a.version ?? '—' }} / {{ a.desiredAgentVersion ?? '—' }}</dd>
+              </div>
+              <div>
+                <dt>restic version (running / desired)</dt>
+                <dd class="mono">
+                  {{ a.resticVersion ?? '—' }} / {{ a.desiredResticVersion ?? '—' }}
+                </dd>
+              </div>
+              <div>
+                <dt>Last update</dt>
+                <dd>
+                  @if (a.lastUpdateVersion) {
+                    <span class="mono">{{ a.lastUpdateVersion }}</span>
+                    <app-badge [value]="a.lastUpdateOutcome" />
+                    <span class="muted"> — {{ a.lastUpdateAt | datetime }}</span>
+                  } @else {
+                    <span class="muted">None</span>
+                  }
+                </dd>
+              </div>
+              @if (a.lastUpdateError) {
+                <div>
+                  <dt>Last update error</dt>
+                  <dd class="error-box">{{ a.lastUpdateError }}</dd>
+                </div>
+              }
+              @if (a.resticUpdateError) {
+                <div>
+                  <dt>restic update error</dt>
+                  <dd class="error-box">{{ a.resticUpdateError }}</dd>
+                </div>
+              }
+            </dl>
+          </section>
+
+          <section class="card form">
+            <h2>Update settings</h2>
+            <form (ngSubmit)="saveSettings(a)">
+              <div class="form-row">
+                <label class="field">
+                  Channel
+                  <select name="channel" [(ngModel)]="settings.channel">
+                    @for (c of channels; track c) {
+                      <option [value]="c">{{ c }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="field">
+                  Pinned agent version
+                  <select name="pinnedAgentVersion" [(ngModel)]="settings.pinnedAgentVersion">
+                    <option value="">none (follow channel)</option>
+                    @for (r of agentReleasesForPlatform(); track r.id) {
+                      <option [value]="r.version">{{ r.version }} ({{ r.channel }})</option>
+                    }
+                  </select>
+                </label>
+                <label class="field">
+                  Pinned restic version
+                  <select name="pinnedResticVersion" [(ngModel)]="settings.pinnedResticVersion">
+                    <option value="">none (follow channel)</option>
+                    @for (r of resticReleasesForPlatform(); track r.id) {
+                      <option [value]="r.version">{{ r.version }}</option>
+                    }
+                  </select>
+                </label>
+              </div>
+              <div class="toolbar">
+                <button type="submit" class="btn primary" [disabled]="savingSettings()">
+                  Save
+                </button>
+              </div>
+            </form>
+          </section>
+        }
       }
     } @else if (agent.isLoading()) {
       <p class="muted">Loading…</p>
@@ -410,6 +520,16 @@ export class AgentDetailPage {
     url: '/api/admin/alerts',
     params: { agentId: this.id(), open: false, limit: 100 },
   }));
+  protected readonly agentReleases = httpResource<Release[]>(() =>
+    this.tab() === 'updates'
+      ? { url: '/api/admin/releases', params: { product: 'agent' } }
+      : undefined,
+  );
+  protected readonly resticReleases = httpResource<Release[]>(() =>
+    this.tab() === 'updates'
+      ? { url: '/api/admin/releases', params: { product: 'restic' } }
+      : undefined,
+  );
 
   protected readonly policyNames = computed(() => lookup(this.policies.value()));
   protected readonly openAlertCount = computed(
@@ -420,10 +540,39 @@ export class AgentDetailPage {
     const target = this.storageTargets.value()?.find((s) => s.id === agent?.storageTargetId);
     return target ? `${target.endpoint}/${target.bucket}` : '…';
   });
+  protected readonly agentReleasesForPlatform = computed(() => {
+    const platform = this.agent.value()?.platform;
+    return (this.agentReleases.value() ?? []).filter((r) => r.platform === platform);
+  });
+  protected readonly resticReleasesForPlatform = computed(() => {
+    const platform = this.agent.value()?.platform;
+    return (this.resticReleases.value() ?? []).filter((r) => r.platform === platform);
+  });
+
+  protected readonly channels = AGENT_CHANNELS;
+  protected settings: UpdateSettingsForm = {
+    channel: 'stable',
+    pinnedAgentVersion: '',
+    pinnedResticVersion: '',
+  };
+  protected readonly savingSettings = signal(false);
+  private readonly settingsReady = signal(false);
 
   constructor() {
     const timer = setInterval(() => this.refresh(), REFRESH_MS);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
+
+    effect(() => {
+      if (this.settingsReady()) return;
+      const a = this.agent.value();
+      if (!a) return;
+      this.settings = {
+        channel: a.channel,
+        pinnedAgentVersion: a.pinnedAgentVersion ?? '',
+        pinnedResticVersion: a.pinnedResticVersion ?? '',
+      };
+      this.settingsReady.set(true);
+    });
   }
 
   private refresh(): void {
@@ -441,6 +590,10 @@ export class AgentDetailPage {
         break;
       case 'policies':
         this.policies.reload();
+        break;
+      case 'updates':
+        this.agentReleases.reload();
+        this.resticReleases.reload();
         break;
     }
   }
@@ -530,5 +683,28 @@ export class AgentDetailPage {
     const tests = this.restoreTests.value() ?? [];
     const currentlyOpen = this.isTestExpanded(id, tests[0]?.id === id);
     this.expandedTest.set(currentlyOpen ? null : id);
+  }
+
+  protected saveSettings(a: Agent): void {
+    this.savingSettings.set(true);
+    const request: UpdateAgentSettingsRequest = {
+      channel: this.settings.channel,
+      pinnedAgentVersion: this.settings.pinnedAgentVersion || null,
+      pinnedResticVersion: this.settings.pinnedResticVersion || null,
+    };
+    this.api
+      .updateAgentSettings(a.id, request, new HttpContext().set(SILENT_ERRORS, true))
+      .subscribe({
+        next: () => {
+          this.toasts.success('Update settings saved');
+          this.savingSettings.set(false);
+          this.settingsReady.set(false);
+          this.agent.reload();
+        },
+        error: (e) => {
+          this.toasts.error(problemMessage(e));
+          this.savingSettings.set(false);
+        },
+      });
   }
 }

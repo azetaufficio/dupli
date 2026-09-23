@@ -8,6 +8,7 @@ public enum AlertKind
     BackupTooOld,
     RepositoryCheckFailed,
     RestoreTestFailed,
+    AgentUpdateFailed,
 }
 
 /// <summary>

@@ -70,7 +70,9 @@ builder.Services.AddSingleton<AgentTokenIssuer>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddScoped<EnrollmentService>();
 builder.Services.AddScoped<JobService>();
-builder.Services.AddScoped<ResticMirror>();
+builder.Services.AddScoped<ReleaseMirror>();
+builder.Services.AddScoped<DesiredVersionResolver>();
+builder.Services.AddHttpClient(AdminApi.GitHubClientName);
 
 var runWorkers = serverOptions.RunBackgroundServices;
 builder.Services.AddPeriodicTask<JobScheduler>(sp => Opt(sp).Jobs.SchedulerInterval, runWorkers);

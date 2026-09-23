@@ -4,20 +4,26 @@ import { Observable } from 'rxjs';
 import {
   Agent,
   Alert,
+  CreateAgentReleaseRequest,
   CreateAgentRequest,
+  CreateReleaseRequest,
   CreateStorageTargetRequest,
   CronPreview,
   Dashboard,
   EnrollmentToken,
+  ImportAgentReleaseRequest,
   Job,
   JobState,
   JobType,
   LogEntry,
   Policy,
   PolicyRequest,
+  Release,
+  ReleaseProduct,
   Run,
   StorageTarget,
   SystemJobType,
+  UpdateAgentSettingsRequest,
 } from './models';
 
 type Query = Record<string, string | number | boolean | null | undefined>;
@@ -148,5 +154,41 @@ export class ApiService {
 
   alerts(query: { open?: boolean; agentId?: string; limit?: number } = {}): Observable<Alert[]> {
     return this.http.get<Alert[]>(`${this.base}/alerts`, { params: params(query) });
+  }
+
+  updateAgentSettings(
+    agentId: string,
+    request: UpdateAgentSettingsRequest,
+    context?: HttpContext,
+  ): Observable<void> {
+    return this.http.put<void>(`${this.base}/agents/${agentId}/update-settings`, request, {
+      context,
+    });
+  }
+
+  releases(product: ReleaseProduct): Observable<Release[]> {
+    return this.http.get<Release[]>(`${this.base}/releases`, { params: params({ product }) });
+  }
+
+  createAgentRelease(
+    request: CreateAgentReleaseRequest,
+    context?: HttpContext,
+  ): Observable<Release> {
+    return this.http.post<Release>(`${this.base}/releases/agent`, request, { context });
+  }
+
+  createResticRelease(request: CreateReleaseRequest, context?: HttpContext): Observable<Release> {
+    return this.http.post<Release>(`${this.base}/releases/restic`, request, { context });
+  }
+
+  importAgentRelease(
+    request: ImportAgentReleaseRequest,
+    context?: HttpContext,
+  ): Observable<Release[]> {
+    return this.http.post<Release[]>(`${this.base}/releases/agent/import`, request, { context });
+  }
+
+  makeReleaseCurrent(id: string): Observable<void> {
+    return this.http.post<void>(`${this.base}/releases/${id}/make-current`, null);
   }
 }

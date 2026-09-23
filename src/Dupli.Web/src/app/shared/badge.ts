@@ -23,12 +23,18 @@ const TONES: Record<string, Tone> = {
   Information: 'info',
   Open: 'bad',
   Resolved: 'ok',
+  RolledBack: 'bad',
+  'Up to date': 'ok',
+  'Update available': 'warn',
+  'Update failed': 'bad',
+  'No launcher': 'muted',
 };
 
 const LABELS: Record<string, string> = {
   SucceededWithWarnings: 'Warnings',
   TimedOut: 'Timed out',
   Information: 'Info',
+  RolledBack: 'Rollback',
 };
 
 /** Colored status pill; the tone is derived from well-known state names. */
