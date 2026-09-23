@@ -10,6 +10,7 @@ import {
   Agent,
   BackupSource,
   CronPreview,
+  DatabaseSelection,
   Policy,
   PolicyRequest,
   StorageTarget,
@@ -27,7 +28,9 @@ interface SourceForm {
   port: number;
   username: string;
   passwordSecret: string;
+  databaseSelection: DatabaseSelection;
   excludeDatabases: string;
+  includeDatabases: string;
   includeGlobals: boolean;
   binDirectory: string;
 }
@@ -48,7 +51,9 @@ function newSource(type: SourceForm['type'], index: number): SourceForm {
     port: 5432,
     username: 'postgres',
     passwordSecret: 'pg-main',
+    databaseSelection: 'AllExcept',
     excludeDatabases: '',
+    includeDatabases: '',
     includeGlobals: true,
     binDirectory: '',
   };
@@ -70,7 +75,9 @@ function toForm(source: BackupSource): SourceForm {
         port: source.port,
         username: source.username,
         passwordSecret: source.passwordSecret,
+        databaseSelection: source.databaseSelection ?? 'AllExcept',
         excludeDatabases: source.excludeDatabases.join('\n'),
+        includeDatabases: (source.includeDatabases ?? []).join('\n'),
         includeGlobals: source.includeGlobals,
         binDirectory: source.binDirectory ?? '',
       };
@@ -92,7 +99,9 @@ function toDto(s: SourceForm): BackupSource {
         port: Number(s.port),
         username: s.username.trim(),
         passwordSecret: s.passwordSecret.trim(),
-        excludeDatabases: lines(s.excludeDatabases),
+        databaseSelection: s.databaseSelection,
+        excludeDatabases: s.databaseSelection === 'AllExcept' ? lines(s.excludeDatabases) : [],
+        includeDatabases: s.databaseSelection === 'Only' ? lines(s.includeDatabases) : [],
         includeGlobals: s.includeGlobals,
         binDirectory: s.binDirectory.trim() || null,
       };
@@ -274,13 +283,49 @@ function supportedTimeZones(): string[] {
                     </label>
                   </div>
                   <div class="form-row">
-                    <label class="field">
-                      Excluded databases
-                      <span class="hint"
-                        >One per line. Templates and <code>postgres</code> are always skipped.</span
-                      >
-                      <textarea [name]="'exdb' + i" [(ngModel)]="s.excludeDatabases"></textarea>
-                    </label>
+                    <div class="field">
+                      Databases
+                      <label class="check">
+                        <input
+                          type="radio"
+                          [name]="'dbsel' + i"
+                          value="AllExcept"
+                          [(ngModel)]="s.databaseSelection"
+                        />
+                        All except the excluded ones
+                      </label>
+                      <label class="check">
+                        <input
+                          type="radio"
+                          [name]="'dbsel' + i"
+                          value="Only"
+                          [(ngModel)]="s.databaseSelection"
+                        />
+                        Only the listed ones
+                      </label>
+                      @if (s.databaseSelection === 'AllExcept') {
+                        <span class="hint"
+                          >Excluded, one per line. Templates and <code>postgres</code> are always
+                          skipped.</span
+                        >
+                        <textarea
+                          [name]="'exdb' + i"
+                          [(ngModel)]="s.excludeDatabases"
+                          aria-label="Excluded databases"
+                        ></textarea>
+                      } @else {
+                        <span class="hint"
+                          >Backed up, one per line (<code>postgres</code> allowed). A database
+                          missing on the server fails the backup.</span
+                        >
+                        <textarea
+                          [name]="'incdb' + i"
+                          [(ngModel)]="s.includeDatabases"
+                          aria-label="Included databases"
+                          required
+                        ></textarea>
+                      }
+                    </div>
                     <label class="field">
                       pg_dump directory
                       <span class="hint"

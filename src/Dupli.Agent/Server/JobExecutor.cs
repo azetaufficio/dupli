@@ -26,6 +26,7 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
                 RetentionJobPayload retention => await RetentionAsync(retention, startedAt, cancellationToken),
                 RepositoryCheckJobPayload check => await CheckAsync(check, startedAt, cancellationToken),
                 RestoreTestJobPayload restoreTest => await RestoreTestAsync(job.JobId, restoreTest, startedAt, cancellationToken),
+                RestoreJobPayload restore => await RestoreAsync(job.JobId, restore, startedAt, cancellationToken),
                 // The restart itself happens after the result is recorded (see ServerAgentLoop).
                 RestartAgentJobPayload => new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow() },
                 _ => Failed(startedAt, $"Job type {job.Type} is not supported by this agent version", ErrorKind.Permanent),
@@ -130,6 +131,47 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
                 BytesProcessed = i.Bytes,
                 Error = i.Error,
             }).ToList(),
+        };
+    }
+
+    private async Task<JobResultDto> RestoreAsync(string jobId, RestoreJobPayload payload, DateTimeOffset startedAt, CancellationToken ct)
+    {
+        // Policies from the server plus the ones cached here: a stale server view must not open a hole in the guard.
+        var policies = payload.Policies.Concat(ledger.KnownPolicies()).ToList();
+        var target = RestoreGuard.ResolveTarget(payload.TargetDirectory, jobId, runtime.Paths, policies);
+        RestoreGuard.EnsureEmpty(target);
+
+        logger.LogInformation("Restoring snapshot {SnapshotId} ({Count} includes) to {Target}",
+            payload.SnapshotId, payload.Includes.Count, target);
+        await runtime.Engine.RestoreAsync(new RestoreRequest(runtime.Repository, payload.SnapshotId, target, payload.Includes), ct);
+
+        var items = new List<JobItemResultDto>
+        {
+            new() { SourceId = "restore", Item = payload.SnapshotId, Outcome = JobOutcome.Succeeded, SnapshotId = payload.SnapshotId, Location = target },
+        };
+
+        if (payload.Postgres is { } pg)
+        {
+            var dump = Path.Combine(target, pg.Database + ".dump");
+            var password = runtime.Secrets.GetRequired(pg.Source.PasswordSecret);
+            var warnings = await runtime.PostgresRestorer.RestoreAsync(pg.Source, password, dump, pg.NewDatabase, ct);
+            items.Add(new JobItemResultDto
+            {
+                SourceId = pg.Source.SourceId,
+                Item = pg.Database,
+                Outcome = warnings.Count == 0 ? JobOutcome.Succeeded : JobOutcome.SucceededWithWarnings,
+                SnapshotId = payload.SnapshotId,
+                Warnings = warnings,
+                Location = $"{pg.Source.Host}:{pg.Source.Port}/{pg.NewDatabase}",
+            });
+        }
+
+        return new JobResultDto
+        {
+            Outcome = items.Any(i => i.Outcome == JobOutcome.SucceededWithWarnings) ? JobOutcome.SucceededWithWarnings : JobOutcome.Succeeded,
+            StartedAt = startedAt,
+            CompletedAt = time.GetUtcNow(),
+            Items = items,
         };
     }
 

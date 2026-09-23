@@ -82,47 +82,42 @@ public sealed partial class PostgresDumpProvider(
     private static async Task<(int ServerMajor, IReadOnlyList<string> Databases)> DiscoverAsync(
         PostgresSourceDto source, string password, CancellationToken ct)
     {
-        var cs = new NpgsqlConnectionStringBuilder
-        {
-            Host = source.Host,
-            Port = source.Port,
-            Username = source.Username,
-            Password = password,
-            Database = "postgres",
-            Timeout = 15,
-            ApplicationName = "Dupli",
-        };
+        await using var conn = await PostgresConnection.OpenAsync(source, password, "postgres", ct);
         try
         {
-            await using var conn = new NpgsqlConnection(cs.ConnectionString);
-            await conn.OpenAsync(ct);
-
             await using var versionCmd = new NpgsqlCommand("SHOW server_version_num", conn);
             var versionNum = int.Parse((string)(await versionCmd.ExecuteScalarAsync(ct))!);
 
             await using var dbCmd = new NpgsqlCommand(
-                "SELECT datname FROM pg_database WHERE NOT datistemplate AND datallowconn AND datname <> 'postgres' ORDER BY datname",
-                conn);
+                "SELECT datname FROM pg_database WHERE NOT datistemplate AND datallowconn ORDER BY datname", conn);
             var dbs = new List<string>();
             await using (var reader = await dbCmd.ExecuteReaderAsync(ct))
                 while (await reader.ReadAsync(ct))
                     dbs.Add(reader.GetString(0));
 
-            var excluded = new HashSet<string>(source.ExcludeDatabases, StringComparer.Ordinal);
-            return (versionNum / 10000, dbs.Where(d => !excluded.Contains(d)).ToList());
-        }
-        catch (PostgresException ex) when (ex.SqlState is "28P01" or "28000")
-        {
-            throw BackupException.Permanent($"PostgreSQL authentication failed for {source.Username}: {ex.MessageText}", ex);
-        }
-        catch (NpgsqlException ex) when (ex.IsTransient)
-        {
-            throw BackupException.Transient($"PostgreSQL {source.Host}:{source.Port} unreachable: {ex.Message}", ex);
+            return (versionNum / 10000, SelectDatabases(source, dbs));
         }
         catch (NpgsqlException ex)
         {
-            throw BackupException.Permanent($"PostgreSQL discovery failed: {ex.Message}", ex);
+            throw PostgresConnection.Map(source, ex);
         }
+    }
+
+    /// <summary>Applies the source's selection mode to the connectable, non-template databases of the server.</summary>
+    public static IReadOnlyList<string> SelectDatabases(PostgresSourceDto source, IReadOnlyList<string> available)
+    {
+        if (source.DatabaseSelection == DatabaseSelection.Only)
+        {
+            var existing = new HashSet<string>(available, StringComparer.Ordinal);
+            var missing = source.IncludeDatabases.Where(d => !existing.Contains(d)).ToList();
+            if (missing.Count > 0)
+                throw BackupException.Permanent(
+                    $"Database(s) not found or not connectable on {source.Host}:{source.Port}: {string.Join(", ", missing)}");
+            return source.IncludeDatabases.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        }
+
+        var excluded = new HashSet<string>(source.ExcludeDatabases, StringComparer.Ordinal) { "postgres" };
+        return available.Where(d => !excluded.Contains(d)).ToList();
     }
 
     private async Task<int> GetToolMajorVersionAsync(string exe, CancellationToken ct)

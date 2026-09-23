@@ -9,6 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Dupli.Server.Tests;
 
+using Agent = Dupli.Server.Domain.Agents.Agent;
+
 /// <summary>Exercises <see cref="DesiredVersionResolver"/> directly against the database (pin, channel fallback, platform).</summary>
 [Collection(ServerCollection.Name)]
 public sealed class DesiredVersionResolverTests(PostgresFixture postgres) : IAsyncLifetime

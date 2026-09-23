@@ -8,9 +8,6 @@ public sealed class DupliServerOptions
     /// <summary>Public base URL agents use (e.g. https://backup.example.com). Defaults to the request host.</summary>
     public string? PublicUrl { get; set; }
 
-    /// <summary>Directory holding the Data Protection key ring. Must be outside the database volume.</summary>
-    public string DataProtectionKeysPath { get; set; } = "/var/lib/dupli/keys";
-
     /// <summary>Directory where mirrored tool binaries (restic) are cached.</summary>
     public string ToolMirrorPath { get; set; } = "/var/lib/dupli/tools";
 
@@ -23,6 +20,49 @@ public sealed class DupliServerOptions
     public AdminOptions Admin { get; set; } = new();
     public AuthOptions Auth { get; set; } = new();
     public ReleaseOptions Releases { get; set; } = new();
+    public RateLimitOptions RateLimiting { get; set; } = new();
+    public RestoreOptions Restore { get; set; } = new();
+}
+
+/// <summary>Server-side, read-only access to agent repositories (snapshot list and browse).</summary>
+public sealed class RestoreOptions
+{
+    /// <summary>Explicit restic executable (dev/tests). When empty, the current restic release for the server platform
+    /// is installed from the release mirror.</summary>
+    public string? ResticPath { get; set; }
+
+    /// <summary>restic cache (per agent sub-directory). Defaults to <c>cache</c> next to <see cref="DupliServerOptions.ToolMirrorPath"/>.</summary>
+    public string? CachePath { get; set; }
+
+    /// <summary>restic retries an unreachable S3 endpoint for minutes: cut a listing short instead.</summary>
+    public TimeSpan ListingTimeout { get; set; } = TimeSpan.FromMinutes(2);
+
+    public TimeSpan SnapshotCacheDuration { get; set; } = TimeSpan.FromSeconds(60);
+    public int MaxConcurrentListings { get; set; } = 4;
+
+    /// <summary>S3 endpoints the server reaches through a different URL than the agents (private endpoint, or a
+    /// container network name in the dev stack).</summary>
+    public List<EndpointOverride> EndpointOverrides { get; set; } = [];
+}
+
+public sealed class EndpointOverride
+{
+    public string From { get; set; } = "";
+    public string To { get; set; } = "";
+}
+
+/// <summary>
+/// Per client IP fixed window on the anonymous endpoints exposed to the internet (agent register/token, operator
+/// login). The IP is the one reported by the reverse proxy (X-Forwarded-For).
+/// </summary>
+public sealed class RateLimitOptions
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Requests allowed per IP and window. Agents refresh their token every ~15 minutes, so the
+    /// default leaves room for a few hundred agents behind one NAT address.</summary>
+    public int PermitLimit { get; set; } = 30;
+    public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(1);
 }
 
 public sealed class AgentOptions

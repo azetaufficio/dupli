@@ -150,3 +150,37 @@ public sealed record DashboardCountersDto(int Online, int Offline, int Pending, 
 public sealed record DashboardAgentDto(AgentDto Agent, string? LastRunStatus, string? RunningJob, int OpenAlerts);
 
 public sealed record CronPreviewDto(bool Valid, string? Error, IReadOnlyList<DateTimeOffset> Next);
+
+/// <summary>A restic snapshot of the agent's repository, with the Dupli tags parsed.</summary>
+public sealed record SnapshotDto(
+    string Id,
+    string ShortId,
+    DateTimeOffset Time,
+    string Host,
+    IReadOnlyList<string> Paths,
+    IReadOnlyList<string> Tags,
+    Guid? PolicyId,
+    string? PolicyName,
+    string? SourceId,
+
+    /// <summary><c>dir</c> or <c>pg</c> (restic <c>type=</c> tag).</summary>
+    string? Type,
+
+    /// <summary>PostgreSQL database of a <c>pg</c> snapshot (<c>_globals</c> for roles/tablespaces).</summary>
+    string? Database);
+
+public sealed record SnapshotNodeDto(string Name, string Path, Dupli.Agent.Core.Backup.SnapshotNodeType Type, long Size, DateTimeOffset? ModifiedAt);
+
+public sealed record CreateRestoreRequest
+{
+    public required string SnapshotId { get; init; }
+
+    /// <summary>Snapshot paths (files or directories) to restore; empty = everything.</summary>
+    public IReadOnlyList<string> Includes { get; init; } = [];
+
+    /// <summary>Directory on the VM (new or empty). Null = <c>C:\\DupliRestore\\&lt;job-id&gt;</c>.</summary>
+    public string? TargetDirectory { get; init; }
+
+    /// <summary>PostgreSQL snapshot only: also <c>pg_restore</c> into this new database.</summary>
+    public string? NewDatabase { get; init; }
+}

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Dupli.Server.Configuration;
+using Dupli.Server.Hosting;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -136,7 +137,7 @@ public static class OperatorAuth
     public static void MapBff(this IEndpointRouteBuilder app)
     {
         var bff = app.MapGroup("/bff").AllowAnonymous();
-        bff.MapGet("/login", LoginAsync);
+        bff.MapGet("/login", LoginAsync).RequireRateLimiting(RateLimiting.AnonymousPolicy);
         bff.MapPost("/logout", LogoutAsync);
         bff.MapGet("/user", User);
     }

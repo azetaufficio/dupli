@@ -52,15 +52,17 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
 
     private readonly string _connectionString;
     private readonly string _authMode;
+    private readonly IReadOnlyDictionary<string, string?> _settings;
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), "dupli-tests", "server", Guid.NewGuid().ToString("N"));
 
     public FakeTimeProvider Time { get; } = new(DateTimeOffset.UtcNow);
     public CapturingNotificationChannel Notifications { get; } = new();
 
-    public DupliTestServer(PostgresFixture postgres, string authMode = "None")
+    public DupliTestServer(PostgresFixture postgres, string authMode = "None", IReadOnlyDictionary<string, string?>? settings = null)
     {
         _connectionString = postgres.ConnectionString($"dupli_{Guid.NewGuid():N}");
         _authMode = authMode;
+        _settings = settings ?? new Dictionary<string, string?>();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -68,11 +70,15 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:Dupli", _connectionString);
         builder.UseSetting("Dupli:RunBackgroundServices", "false");
-        builder.UseSetting("Dupli:DataProtectionKeysPath", Path.Combine(_dataDir, "keys"));
+        builder.UseSetting("DataProtection:FileSystem:Path", Path.Combine(_dataDir, "keys"));
         builder.UseSetting("Dupli:ToolMirrorPath", Path.Combine(_dataDir, "tools"));
         builder.UseSetting("Dupli:Admin:ApiKey", AdminKey);
         builder.UseSetting("Dupli:PublicUrl", "https://dupli.test");
         builder.UseSetting("Dupli:Auth:Mode", _authMode);
+        // Every test client shares one (null) remote IP: keep the anonymous rate limit out of the way.
+        builder.UseSetting("Dupli:RateLimiting:PermitLimit", "100000");
+        foreach (var (key, value) in _settings)
+            builder.UseSetting(key, value);
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<TimeProvider>(Time);

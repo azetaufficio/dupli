@@ -37,13 +37,27 @@ public sealed record PostgresSourceDto : BackupSourceDto
     /// <summary>Name of the secret holding the password in the agent secret store.</summary>
     public required string PasswordSecret { get; init; }
 
-    /// <summary>Databases never dumped, in addition to templates and <c>postgres</c>.</summary>
+    public DatabaseSelection DatabaseSelection { get; init; } = DatabaseSelection.AllExcept;
+
+    /// <summary><see cref="DatabaseSelection.AllExcept"/>: databases never dumped, in addition to templates and <c>postgres</c>.</summary>
     public IReadOnlyList<string> ExcludeDatabases { get; init; } = [];
+
+    /// <summary><see cref="DatabaseSelection.Only"/>: the databases dumped (<c>postgres</c> allowed). A missing one fails the source.</summary>
+    public IReadOnlyList<string> IncludeDatabases { get; init; } = [];
 
     public bool IncludeGlobals { get; init; } = true;
 
     /// <summary>Optional explicit bin directory (containing pg_dump). Auto-detected when null.</summary>
     public string? BinDirectory { get; init; }
+}
+
+public enum DatabaseSelection
+{
+    /// <summary>Every connectable non-template database except <c>postgres</c> and <see cref="PostgresSourceDto.ExcludeDatabases"/>.</summary>
+    AllExcept,
+
+    /// <summary>Exactly <see cref="PostgresSourceDto.IncludeDatabases"/>.</summary>
+    Only,
 }
 
 public sealed record RetentionDto

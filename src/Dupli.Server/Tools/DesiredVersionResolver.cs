@@ -5,6 +5,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dupli.Server.Tools;
 
+// Dupli.Agent (namespace, from Agent.Core) would otherwise shadow the entity.
+using Agent = Dupli.Server.Domain.Agents.Agent;
+
 /// <summary>
 /// Resolves the agent and restic release an agent should run: pin (any channel) first, then the current
 /// release of the agent's channel for its platform, falling back dev -&gt; beta -&gt; stable. Null when nothing

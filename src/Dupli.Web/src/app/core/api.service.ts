@@ -7,6 +7,7 @@ import {
   CreateAgentReleaseRequest,
   CreateAgentRequest,
   CreateReleaseRequest,
+  CreateRestoreRequest,
   CreateStorageTargetRequest,
   CronPreview,
   Dashboard,
@@ -21,6 +22,8 @@ import {
   Release,
   ReleaseProduct,
   Run,
+  Snapshot,
+  SnapshotNode,
   StorageTarget,
   SystemJobType,
   UpdateAgentSettingsRequest,
@@ -89,6 +92,24 @@ export class ApiService {
 
   enableAgent(agentId: string): Observable<void> {
     return this.http.post<void>(`${this.base}/agents/${agentId}/enable`, null);
+  }
+
+  snapshots(agentId: string, refresh = false, context?: HttpContext): Observable<Snapshot[]> {
+    return this.http.get<Snapshot[]>(`${this.base}/agents/${agentId}/snapshots`, {
+      params: params({ refresh: refresh || null }),
+      context,
+    });
+  }
+
+  snapshotTree(agentId: string, snapshotId: string, path: string): Observable<SnapshotNode[]> {
+    return this.http.get<SnapshotNode[]>(
+      `${this.base}/agents/${agentId}/snapshots/${snapshotId}/tree`,
+      { params: params({ path }) },
+    );
+  }
+
+  createRestore(agentId: string, request: CreateRestoreRequest): Observable<Job> {
+    return this.http.post<Job>(`${this.base}/agents/${agentId}/restores`, request);
   }
 
   runSystemJob(agentId: string, type: SystemJobType): Observable<Job> {

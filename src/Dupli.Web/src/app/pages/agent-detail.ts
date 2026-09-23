@@ -23,9 +23,11 @@ import { ToastService } from '../core/toast.service';
 import { Badge } from '../shared/badge';
 import { ConfirmService } from '../shared/confirm';
 import { BytesPipe, DateTimePipe, DurationPipe, RelativeTimePipe } from '../shared/format';
+import { SnapshotBrowser } from '../shared/snapshot-browser';
 import { AlertsTable, ItemsTable, JobsTable, LogsTable, RunsTable, lookup } from '../shared/tables';
 
-type Tab = 'policies' | 'jobs' | 'history' | 'restore-tests' | 'logs' | 'alerts' | 'updates';
+type Tab =
+  'policies' | 'snapshots' | 'jobs' | 'history' | 'restore-tests' | 'logs' | 'alerts' | 'updates';
 
 interface UpdateSettingsForm {
   channel: AgentChannel;
@@ -72,6 +74,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
     RelativeTimePipe,
     RouterLink,
     RunsTable,
+    SnapshotBrowser,
   ],
   template: `
     @if (agent.value(); as a) {
@@ -183,6 +186,9 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         <button type="button" [class.active]="tab() === 'policies'" (click)="tab.set('policies')">
           Policies<span class="count">{{ policies.value()?.length ?? 0 }}</span>
         </button>
+        <button type="button" [class.active]="tab() === 'snapshots'" (click)="tab.set('snapshots')">
+          Snapshots
+        </button>
         <button type="button" [class.active]="tab() === 'jobs'" (click)="tab.set('jobs')">
           Jobs
         </button>
@@ -282,6 +288,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 </table>
               </div>
             }
+          </section>
+        }
+        @case ('snapshots') {
+          <section class="card">
+            <app-snapshot-browser [agentId]="a.id" (restored)="tab.set('jobs')" />
           </section>
         }
         @case ('jobs') {

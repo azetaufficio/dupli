@@ -7,6 +7,7 @@ using Dupli.Agent.Cli;
 using Dupli.Agent.Configuration;
 using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Secrets;
+using Dupli.Agent.Core.Tools;
 using Dupli.Agent.Launcher;
 using Dupli.Agent.Server;
 using Dupli.Agent.Updates;
@@ -239,6 +240,70 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
     }
 
     /// <summary>Operator creates storage target + agent + token (and the host's restic release); the agent enrolls.</summary>
+    [Fact]
+    public async Task Operator_browses_snapshots_from_the_server_and_restores_on_the_agent()
+    {
+        var admin = _server.CreateClient();
+        admin.DefaultRequestHeaders.Add(AuthConstants.AdminKeyHeader, AdminKey);
+        var (agentId, paths, secrets, config) = await EnrollAgentAsync(admin, "vm-restore");
+
+        var data = Directory.CreateDirectory(Path.Combine(_root, "restore-data")).FullName;
+        Directory.CreateDirectory(Path.Combine(data, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(data, "a.txt"), "top");
+        await File.WriteAllTextAsync(Path.Combine(data, "sub", "b.txt"), "nested");
+        var policy = await Read<PolicyDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/policies", new PolicyRequest
+        {
+            Name = "files", Cron = "0 2 * * *",
+            Sources = [new DirectorySourceDto { SourceId = "data", Paths = [data] }],
+        }, DupliJson.Options));
+        var (loop, _, _) = CreateAgent(paths, config, secrets);
+        await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
+        await loop.RunOnceAsync(CancellationToken.None);
+
+        // The server reads the repository itself (restic from its mirror, escrowed credentials).
+        var snapshot = Assert.Single(await Read<List<SnapshotDto>>(await admin.GetAsync($"/api/admin/agents/{agentId}/snapshots")));
+        Assert.Equal((policy.Id, "files", "data", "dir"), (snapshot.PolicyId!.Value, snapshot.PolicyName, snapshot.SourceId, snapshot.Type));
+        var root = Assert.Single(snapshot.Paths);
+
+        var tree = await Read<List<SnapshotNodeDto>>(await admin.GetAsync(
+            $"/api/admin/agents/{agentId}/snapshots/{snapshot.ShortId}/tree?path={Uri.EscapeDataString(root)}"));
+        Assert.Equal(new[] { "sub", "a.txt" }, tree.Select(n => n.Name).ToArray());
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await admin.GetAsync(
+            $"/api/admin/agents/{agentId}/snapshots/{snapshot.ShortId}/tree?path={Uri.EscapeDataString(root + "/../x")}")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, (await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/restores",
+            new CreateRestoreRequest { SnapshotId = "deadbeef" }, DupliJson.Options)).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/restores",
+            new CreateRestoreRequest { SnapshotId = snapshot.Id, NewDatabase = "copy" }, DupliJson.Options)).StatusCode);
+
+        // Restore only the sub directory into a new directory: executed by the agent.
+        var target = Path.Combine(_root, "restored");
+        var restore = await Read<JobDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/restores",
+            new CreateRestoreRequest { SnapshotId = snapshot.Id, Includes = [root + "/sub"], TargetDirectory = target },
+            DupliJson.Options));
+        Assert.Equal(JobType.Restore, restore.Type);
+        await loop.RunOnceAsync(CancellationToken.None);
+
+        var done = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{restore.Id}"));
+        Assert.Equal(JobState.Succeeded, done.State);
+        Assert.Equal(target, Assert.Single(done.Items).Location);
+        var restoredRoot = Path.Combine(target, root.TrimStart('/'));
+        Assert.Equal("nested", await File.ReadAllTextAsync(Path.Combine(restoredRoot, "sub", "b.txt")));
+        Assert.False(File.Exists(Path.Combine(restoredRoot, "a.txt")));
+
+        // Never over existing data: a non-empty target and a backed-up path are both refused by the agent.
+        foreach (var (refused, reason) in new[] { (target, "not empty"), (data, "coincides with") })
+        {
+            var job = await Read<JobDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/restores",
+                new CreateRestoreRequest { SnapshotId = snapshot.Id, TargetDirectory = refused }, DupliJson.Options));
+            await loop.RunOnceAsync(CancellationToken.None);
+            var failed = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{job.Id}"));
+            Assert.Equal(JobState.Failed, failed.State);
+            Assert.Contains(reason, failed.Error);
+        }
+        Assert.Equal("top", await File.ReadAllTextAsync(Path.Combine(data, "a.txt")));
+    }
+
     private async Task<(Guid AgentId, AgentPaths Paths, MemorySecretStore Secrets, AgentConfig Config)> EnrollAgentAsync(HttpClient admin, string name)
     {
         var storage = await Read<StorageTargetDto>(await admin.PostAsJsonAsync("/api/admin/storage-targets",
@@ -320,9 +385,10 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
             builder.UseEnvironment("Testing");
             builder.UseSetting("ConnectionStrings:Dupli", connectionString);
             builder.UseSetting("Dupli:RunBackgroundServices", "false");
-            builder.UseSetting("Dupli:DataProtectionKeysPath", Path.Combine(dataDir, "keys"));
+            builder.UseSetting("DataProtection:FileSystem:Path", Path.Combine(dataDir, "keys"));
             builder.UseSetting("Dupli:ToolMirrorPath", Path.Combine(dataDir, "tools"));
             builder.UseSetting("Dupli:Admin:ApiKey", AdminKey);
+            builder.UseSetting("Dupli:RateLimiting:PermitLimit", "100000");
             builder.UseSetting("Dupli:Releases:AllowInsecureSources", "true");
         }
     }

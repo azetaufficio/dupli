@@ -109,6 +109,36 @@ public sealed class ResticBackupEngineTests(ResticFixture restic) : IDisposable
         Assert.True(check.Success, string.Join('\n', check.Messages));
     }
 
+    [Fact]
+    public async Task List_directory_returns_direct_children_read_only()
+    {
+        var source = Directory.CreateDirectory(_tmp.Combine("data")).FullName;
+        Directory.CreateDirectory(Path.Combine(source, "sub", "deep"));
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "hello");
+        await File.WriteAllTextAsync(Path.Combine(source, "sub", "deep", "c.txt"), "x");
+
+        var repo = Repo();
+        await _engine.EnsureRepositoryAsync(repo, default);
+        var backup = await _engine.BackupAsync(new BackupRequest(repo, "vm-test", [], new PathsInput([source], [])), default);
+
+        // The server browses with a read-only target (--no-lock).
+        var readOnly = new RepositoryTarget(repo.Repository, repo.Password, repo.Environment, readOnly: true);
+        var snapshotPath = Assert.Single(Assert.Single(await _engine.ListSnapshotsAsync(readOnly, [], default)).Paths);
+
+        var children = await _engine.ListDirectoryAsync(readOnly, backup.SnapshotId, snapshotPath, default);
+        Assert.Equal(new[] { "sub", "a.txt" }, children.Select(n => n.Name).ToArray());
+        Assert.Equal(SnapshotNodeType.Directory, children[0].Type);
+        var file = children[1];
+        Assert.Equal((SnapshotNodeType.File, 5L, snapshotPath + "/a.txt"), (file.Type, file.Size, file.Path));
+        Assert.NotNull(file.ModifiedAt);
+
+        var sub = await _engine.ListDirectoryAsync(readOnly, backup.SnapshotId, snapshotPath + "/sub/", default);
+        Assert.Equal("deep", Assert.Single(sub).Name);
+
+        var root = await _engine.ListDirectoryAsync(readOnly, backup.SnapshotId, "/", default);
+        Assert.Single(root);
+    }
+
     public void Dispose() => _tmp.Dispose();
 }
 

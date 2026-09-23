@@ -10,9 +10,10 @@ using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Infrastructure.Notifications;
 using Dupli.Server.Infrastructure.Security;
 using Dupli.Server.Jobs;
+using Dupli.Server.Restore;
 using Dupli.Server.Tools;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -49,9 +50,8 @@ builder.Services.AddDbContext<DupliDbContext>(o => o
     .UseNpgsql(connectionString)
     .UseSnakeCaseNamingConvention());
 
-builder.Services.AddDataProtection()
-    .SetApplicationName("Dupli")
-    .PersistKeysToFileSystem(new DirectoryInfo(serverOptions.DataProtectionKeysPath));
+builder.Services.AddDupliDataProtection(builder.Configuration);
+builder.Services.AddDupliRateLimiting(serverOptions.RateLimiting);
 
 builder.Services.ConfigureHttpJsonOptions(o => DupliJson.Configure(o.SerializerOptions));
 builder.Services.AddProblemDetails();
@@ -72,6 +72,8 @@ builder.Services.AddScoped<EnrollmentService>();
 builder.Services.AddScoped<JobService>();
 builder.Services.AddScoped<ReleaseMirror>();
 builder.Services.AddScoped<DesiredVersionResolver>();
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<RepositoryBrowser>();
 builder.Services.AddHttpClient(AdminApi.GitHubClientName);
 
 var runWorkers = serverOptions.RunBackgroundServices;
@@ -100,6 +102,10 @@ var app = builder.Build();
 
 DatabaseMigrator.Migrate(connectionString, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Dupli.Migrations"));
 
+// Load the key ring now: an unreachable Key Vault or unwritable key directory must fail the startup, not every
+// request that later unprotects a secret or a session cookie.
+app.Services.GetRequiredService<IKeyManager>().GetAllKeys();
+
 app.UseForwardedHeaders();
 app.UseSecurityHeaders(serverOptions);
 app.UseSerilogRequestLogging();
@@ -108,6 +114,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapAgentApi();

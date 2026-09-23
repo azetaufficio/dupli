@@ -1,6 +1,11 @@
 # Azure Container Apps definition for dupli-server. Values come from environment variables via envsubst;
 # see docs/deploy-azure-container-apps.md. Never commit the rendered file: it contains secrets.
 location: ${LOC}
+identity:
+  # Reads and writes the Data Protection key ring in Key Vault (role Key Vault Secrets Officer on the vault).
+  type: UserAssigned
+  userAssignedIdentities:
+    ${IDENTITY_ID}: {}
 properties:
   managedEnvironmentId: ${ENV_ID}
   configuration:
@@ -33,6 +38,14 @@ properties:
             value: https://${FQDN}
           - name: Dupli__Agents__SigningKey
             secretRef: agents-signing-key
+          - name: DataProtection__KeyStore
+            value: AzureKeyVault
+          - name: DataProtection__AzureKeyVault__VaultUri
+            value: https://${KV}.vault.azure.net/
+          - name: DataProtection__AzureKeyVault__Credential
+            value: ManagedIdentity
+          - name: DataProtection__AzureKeyVault__ClientId
+            value: ${IDENTITY_CLIENT_ID}
           - name: Dupli__Auth__Mode
             value: EntraId
           - name: Dupli__Auth__EntraId__TenantId
@@ -68,15 +81,6 @@ properties:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
-        volumeMounts:
-          - volumeName: keys
-            mountPath: /var/lib/dupli/keys
     scale:
       minReplicas: 1
       maxReplicas: 1
-    volumes:
-      - name: keys
-        storageType: AzureFile
-        storageName: dupli-keys
-        # The container runs as user "app" (uid 1654): the share must be writable by it.
-        mountOptions: "uid=1654,gid=1654,dir_mode=0700,file_mode=0600"

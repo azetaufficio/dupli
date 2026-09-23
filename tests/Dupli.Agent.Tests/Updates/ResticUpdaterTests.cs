@@ -112,6 +112,7 @@ public sealed class ResticUpdaterTests : IDisposable
         public Task<BackupResult> BackupAsync(BackupRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<SnapshotInfo>> ListSnapshotsAsync(RepositoryTarget repository, IReadOnlyList<string> tags, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<SnapshotFile>> ListFilesAsync(RepositoryTarget repository, string snapshotId, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<SnapshotNode>> ListDirectoryAsync(RepositoryTarget repository, string snapshotId, string directory, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task RestoreAsync(RestoreRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task ForgetAsync(ForgetRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<CheckResult> CheckAsync(RepositoryTarget repository, int readDataSubsetPercent, CancellationToken cancellationToken) => throw new NotSupportedException();

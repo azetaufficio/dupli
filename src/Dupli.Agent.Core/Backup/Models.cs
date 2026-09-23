@@ -7,10 +7,17 @@ namespace Dupli.Agent.Core.Backup;
 public sealed class RepositoryTarget(
     string repository,
     string password,
-    IReadOnlyDictionary<string, string>? environment = null)
+    IReadOnlyDictionary<string, string>? environment = null,
+    bool readOnly = false)
 {
     public string Repository { get; } = repository;
     public string Password { get; } = password;
+
+    /// <summary>
+    /// Read-only access (the server browsing an agent's repository): listings run with <c>--no-lock</c>, so they
+    /// never wait for, nor leave behind, a lock the agent would have to deal with.
+    /// </summary>
+    public bool ReadOnly { get; } = readOnly;
 
     /// <summary>Backend credentials (e.g. AWS_ACCESS_KEY_ID). Values are secret.</summary>
     public IReadOnlyDictionary<string, string> Environment { get; } =
@@ -80,6 +87,17 @@ public sealed record RestoreRequest(
     bool Verify = false);
 
 public sealed record SnapshotFile(string Path, long Size);
+
+public enum SnapshotNodeType
+{
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+/// <summary>A direct child of a snapshot directory (restic paths, forward slashes).</summary>
+public sealed record SnapshotNode(string Name, string Path, SnapshotNodeType Type, long Size, DateTimeOffset? ModifiedAt);
 
 public sealed record ForgetRequest(
     RepositoryTarget Repository,

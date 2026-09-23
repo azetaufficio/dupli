@@ -107,6 +107,9 @@ export class JobsTable {
               <td class="mono">{{ item.snapshotId?.slice(0, 8) ?? '—' }}</td>
               <td class="num">{{ item.bytesProcessed | bytes }}</td>
               <td class="muted">
+                @if (item.location) {
+                  <div class="mono">→ {{ item.location }}</div>
+                }
                 {{ item.error }}
                 @for (w of item.warnings; track $index) {
                   <div>⚠ {{ w }}</div>

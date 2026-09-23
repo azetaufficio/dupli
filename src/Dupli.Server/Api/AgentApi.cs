@@ -6,6 +6,7 @@ using Dupli.Server.Agents;
 using Dupli.Server.Auth;
 using Dupli.Server.Configuration;
 using Dupli.Server.Domain.Monitoring;
+using Dupli.Server.Hosting;
 using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Jobs;
 using Dupli.Server.Tools;
@@ -22,9 +23,9 @@ public static class AgentApi
     public static void MapAgentApi(this IEndpointRouteBuilder app)
     {
         var anonymous = app.MapGroup("/api").AllowAnonymous();
-        anonymous.MapPost("/agents/register", RegisterAsync);
+        anonymous.MapPost("/agents/register", RegisterAsync).RequireRateLimiting(RateLimiting.AnonymousPolicy);
         anonymous.MapPost("/agents/token", (AgentTokenRequest request, EnrollmentService enrollment, CancellationToken ct) =>
-            enrollment.IssueTokenAsync(request, ct));
+            enrollment.IssueTokenAsync(request, ct)).RequireRateLimiting(RateLimiting.AnonymousPolicy);
         anonymous.MapGet("/tools/restic/manifest", ManifestAsync);
         anonymous.MapGet("/tools/restic/{version}/{platform}", (string version, string platform, ReleaseMirror mirror, CancellationToken ct) =>
             DownloadAsync(ReleaseMirror.ResticProduct, version, platform, mirror, ct));

@@ -57,6 +57,10 @@ public sealed class JobService(
         return await CreateAsync(agentId, null, type, trigger, scheduledAt, payload, ct, expiry);
     }
 
+    /// <summary>At most one pending restore per agent (system-job coalescing); null when one is already waiting.</summary>
+    public Task<Job?> CreateRestoreJobAsync(Guid agentId, RestoreJobPayload payload, DateTimeOffset scheduledAt, CancellationToken ct) =>
+        CreateAsync(agentId, null, JobType.Restore, JobTrigger.Manual, scheduledAt, payload, ct);
+
     private async Task<Job?> CreateAsync(
         Guid agentId, Guid? policyId, JobType type, JobTrigger trigger, DateTimeOffset scheduledAt,
         JobPayloadDto payload, CancellationToken ct, TimeSpan? expiry = null)

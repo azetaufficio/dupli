@@ -9,6 +9,8 @@ public sealed class ApiException(int statusCode, string message) : Exception(mes
     public static ApiException BadRequest(string message) => new(StatusCodes.Status400BadRequest, message);
     public static ApiException Conflict(string message) => new(StatusCodes.Status409Conflict, message);
     public static ApiException Unauthorized(string message) => new(StatusCodes.Status401Unauthorized, message);
+    public static ApiException Unavailable(string message) => new(StatusCodes.Status503ServiceUnavailable, message);
+    public static ApiException BadGateway(string message) => new(StatusCodes.Status502BadGateway, message);
 }
 
 public static class ApiExceptionMiddleware

@@ -45,6 +45,9 @@ public static class PolicyValidator
                     throw ApiException.BadRequest($"Source '{source.SourceId}' needs username and passwordSecret");
                 case PostgresSourceDto pg when pg.Port is <= 0 or > 65535:
                     throw ApiException.BadRequest($"Source '{source.SourceId}' has an invalid port");
+                case PostgresSourceDto { DatabaseSelection: DatabaseSelection.Only } pg
+                    when pg.IncludeDatabases.Count == 0 || pg.IncludeDatabases.Any(string.IsNullOrWhiteSpace):
+                    throw ApiException.BadRequest($"Source '{source.SourceId}' selects only listed databases but the list is empty");
             }
         }
     }

@@ -42,6 +42,15 @@ bootstrap() {
     curl -sS -o /dev/null --aws-sigv4 "aws:amz:$S3_REGION:s3" --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" \
         -X PUT "$S3_ENDPOINT/$S3_BUCKET" || true
 
+    # The dev server may run on a macOS host: it reads repositories (snapshot browse) with its own restic build.
+    # Conflict = already registered.
+    for platform in darwin_arm64:7be0a144ccc377880f294204aa271d76e4b79554b42a751151d425ce6ebac143 \
+                    darwin_amd64:c38d579622cf602f665234c5a8c315030b6cf70656028fe6dc29a786b60e5f35; do
+        api POST /releases/restic -d "$(jq -n --arg p "${platform%%:*}" --arg s "${platform#*:}" \
+            '{version: "0.19.1", platform: $p, sourceUrl: ("https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_" + $p + ".bz2"), sha256: $s}')" \
+            > /dev/null 2>&1 || true
+    done
+
     storage=$(api GET /storage-targets | jq -r '.[] | select(.name == "local-s3") | .id')
     if [ -z "$storage" ]; then
         storage=$(api POST /storage-targets -d "$(jq -n --arg e "$S3_ENDPOINT" --arg b "$S3_BUCKET" --arg r "$S3_REGION" \

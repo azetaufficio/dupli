@@ -149,6 +149,20 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
         Assert.Equal(0, list.ExitCode);
         Assert.Contains(listing, l => l.Contains("TABLE public items"));
 
+        // Load the dump into a new database; a second attempt on the same name must refuse to touch it.
+        var restorer = new PostgresRestorer(new StaticPostgresBinLocator([]), restic.Runner, NullLogger<PostgresRestorer>.Instance);
+        var pgSource = (PostgresSourceDto)policy.Sources[2];
+        Assert.Empty(await restorer.RestoreAsync(pgSource, PgPassword, dumpFile, "app_one_copy", default));
+        var copy = new NpgsqlConnectionStringBuilder(_pg.GetConnectionString()) { Database = "app_one_copy" };
+        await using (var c = new NpgsqlConnection(copy.ConnectionString))
+        {
+            await c.OpenAsync();
+            Assert.Equal(2L, await new NpgsqlCommand("SELECT count(*) FROM items", c).ExecuteScalarAsync());
+        }
+        var exists = await Assert.ThrowsAsync<BackupException>(() =>
+            restorer.RestoreAsync(pgSource, PgPassword, dumpFile, "app_one", default));
+        Assert.Contains("already exists", exists.Message);
+
         var globals = Assert.Single(await engine.ListSnapshotsAsync(repo, ["db=_globals"], default));
         await engine.RestoreAsync(new RestoreRequest(repo, globals.Id, target, []), default);
         Assert.Contains("CREATE ROLE app_user", await File.ReadAllTextAsync(Path.Combine(target, "globals.sql")));
@@ -199,6 +213,40 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
         Assert.Equal(RunStatus.Failed, item.Status);
         Assert.Equal(ErrorKind.Permanent, item.ErrorKind);
         Assert.Contains("authentication failed", item.Error);
+    }
+
+    [SkippableFact]
+    public async Task Only_selection_dumps_exactly_the_listed_databases()
+    {
+        Skip.If(PgBin is null, "pg_dump not available");
+
+        var pgBuilder = new NpgsqlConnectionStringBuilder(_pg!.GetConnectionString());
+        PolicySpecDto Policy(params string[] databases) => new()
+        {
+            PolicyId = "pol-3",
+            Name = "Only",
+            Sources =
+            [
+                new PostgresSourceDto
+                {
+                    SourceId = "pg", Host = pgBuilder.Host!, Port = pgBuilder.Port, Username = pgBuilder.Username!,
+                    PasswordSecret = "pg-password", BinDirectory = PgBin, IncludeGlobals = false,
+                    DatabaseSelection = DatabaseSelection.Only, IncludeDatabases = databases,
+                },
+            ],
+        };
+        var repo = new RepositoryTarget(_tmp.Combine("repo-only"), "repo-password",
+            new Dictionary<string, string> { ["RESTIC_CACHE_DIR"] = _tmp.Combine("cache") });
+        var runner = CreateRunner(restic.CreateEngine(), new MemorySecrets { ["pg-password"] = PgPassword });
+
+        var result = await runner.RunAsync(Policy("postgres", "skipped"), repo, "vm-001", default);
+        Assert.Equal(RunStatus.Succeeded, result.Status);
+        Assert.Equal(new[] { "postgres", "skipped" }, result.Items.Select(i => i.Item).Order().ToArray());
+
+        var missing = Assert.Single((await runner.RunAsync(Policy("app_one", "nope"), repo, "vm-001", default)).Items);
+        Assert.Equal(RunStatus.Failed, missing.Status);
+        Assert.Equal(ErrorKind.Permanent, missing.ErrorKind);
+        Assert.Contains("nope", missing.Error);
     }
 
     private PolicyRunner CreateRunner(IBackupEngine engine, ISecretStore secrets) => new(

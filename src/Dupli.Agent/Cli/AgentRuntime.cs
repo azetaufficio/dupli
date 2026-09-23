@@ -21,6 +21,7 @@ public sealed record AgentRuntime(
     RepositoryTarget Repository,
     PolicyRunner PolicyRunner,
     RestoreTester RestoreTester,
+    PostgresRestorer PostgresRestorer,
     ActiveResticManifest Restic,
     ResticToolManager ResticTools,
     IProcessRunner Processes);
@@ -56,6 +57,9 @@ public static class AgentRuntimeFactory
 
         var restoreTester = new RestoreTester(engine, binLocator, processRunner, loggerFactory.CreateLogger<RestoreTester>());
 
-        return new AgentRuntime(config, paths, secrets, engine, repository, policyRunner, restoreTester, restic, toolManager, processRunner);
+        var postgresRestorer = new PostgresRestorer(binLocator, processRunner, loggerFactory.CreateLogger<PostgresRestorer>());
+
+        return new AgentRuntime(
+            config, paths, secrets, engine, repository, policyRunner, restoreTester, postgresRestorer, restic, toolManager, processRunner);
     }
 }

@@ -159,6 +159,9 @@ export interface DirectorySource {
   excludes: string[];
 }
 
+/** AllExcept: every database except templates, postgres and excludeDatabases. Only: exactly includeDatabases. */
+export type DatabaseSelection = 'AllExcept' | 'Only';
+
 export interface PostgresSource {
   type: 'postgres';
   sourceId: string;
@@ -166,7 +169,9 @@ export interface PostgresSource {
   port: number;
   username: string;
   passwordSecret: string;
+  databaseSelection: DatabaseSelection;
   excludeDatabases: string[];
+  includeDatabases: string[];
   includeGlobals: boolean;
   binDirectory: string | null;
 }
@@ -198,6 +203,8 @@ export interface JobItemResult {
   bytesAdded: number;
   warnings: string[];
   error: string | null;
+  /** Restore: target directory or database. */
+  location?: string | null;
 }
 
 export interface Job {
@@ -291,4 +298,38 @@ export interface ProblemDetails {
   title?: string;
   detail?: string;
   status?: number;
+}
+
+/** A restic snapshot of an agent's repository, Dupli tags parsed. */
+export interface Snapshot {
+  id: string;
+  shortId: string;
+  time: string;
+  host: string;
+  paths: string[];
+  tags: string[];
+  policyId: string | null;
+  policyName: string | null;
+  sourceId: string | null;
+  /** 'dir' | 'pg' */
+  type: string | null;
+  /** PostgreSQL database ('_globals' = roles/tablespaces). */
+  database: string | null;
+}
+
+export type SnapshotNodeType = 'File' | 'Directory' | 'Symlink' | 'Other';
+
+export interface SnapshotNode {
+  name: string;
+  path: string;
+  type: SnapshotNodeType;
+  size: number;
+  modifiedAt: string | null;
+}
+
+export interface CreateRestoreRequest {
+  snapshotId: string;
+  includes: string[];
+  targetDirectory: string | null;
+  newDatabase: string | null;
 }

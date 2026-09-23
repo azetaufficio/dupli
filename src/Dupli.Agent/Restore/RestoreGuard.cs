@@ -10,14 +10,15 @@ namespace Dupli.Agent.Restore;
 /// </summary>
 public static class RestoreGuard
 {
+    /// <param name="defaultName">Folder name under the default restore root when no target is requested (snapshot or job id).</param>
     public static string ResolveTarget(
         string? requestedTarget,
-        string snapshotId,
+        string defaultName,
         AgentPaths paths,
         IReadOnlyList<PolicySpecDto> policies)
     {
         var target = string.IsNullOrWhiteSpace(requestedTarget)
-            ? DefaultTarget(paths, snapshotId)
+            ? DefaultTarget(paths, defaultName)
             : Path.GetFullPath(requestedTarget);
 
         var sourcePaths = policies
@@ -35,10 +36,19 @@ public static class RestoreGuard
         return target;
     }
 
-    private static string DefaultTarget(AgentPaths paths, string snapshotId) =>
+    private static string DefaultTarget(AgentPaths paths, string name) =>
         OperatingSystem.IsWindows()
-            ? Path.Combine("C:\\DupliRestore", snapshotId)
-            : Path.Combine(paths.Tmp, "restore", snapshotId);
+            ? Path.Combine("C:\\DupliRestore", name)
+            : Path.Combine(paths.Tmp, "restore", name);
+
+    /// <summary>restic restore overwrites what it finds: the target must be new or empty.</summary>
+    public static void EnsureEmpty(string target)
+    {
+        if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any())
+            throw new InvalidOperationException($"Restore target '{target}' is not empty. Choose a new or empty directory.");
+        if (File.Exists(target))
+            throw new InvalidOperationException($"Restore target '{target}' is a file.");
+    }
 
     private static bool Overlaps(string target, string source)
     {

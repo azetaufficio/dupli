@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Dupli.Agent.Core\Dupli.Agent.Core.csproj" />
     <ProjectReference Include="..\Dupli.Contracts\Dupli.Contracts.csproj" />
     <ProjectReference Include="..\Dupli.Server.Domain\Dupli.Server.Domain.csproj" />
     <ProjectReference Include="..\Dupli.Server.Infrastructure\Dupli.Server.Infrastructure.csproj" />

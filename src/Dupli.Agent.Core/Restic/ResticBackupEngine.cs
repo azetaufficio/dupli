@@ -118,6 +118,8 @@ public sealed class ResticBackupEngine(
         CancellationToken cancellationToken)
     {
         var args = new List<string> { "snapshots", "--json" };
+        if (repository.ReadOnly)
+            args.Add("--no-lock");
         foreach (var tag in tags)
             args.AddRange(["--tag", tag]);
 
@@ -158,7 +160,7 @@ public sealed class ResticBackupEngine(
     {
         // One JSON object per line: the snapshot first, then one per node.
         var files = new List<SnapshotFile>();
-        var result = await RunAsync(repository, ["ls", "--json", snapshotId], null, cancellationToken, line =>
+        var result = await RunAsync(repository, LsArgs(repository, snapshotId), null, cancellationToken, line =>
         {
             if (!TryParse(line, out var doc))
                 return;
@@ -173,6 +175,47 @@ public sealed class ResticBackupEngine(
             throw ResticErrors.FromExitCode("ls", result.ExitCode, result.StderrTail);
         return files;
     }
+
+    public async Task<IReadOnlyList<SnapshotNode>> ListDirectoryAsync(
+        RepositoryTarget repository,
+        string snapshotId,
+        string directory,
+        CancellationToken cancellationToken)
+    {
+        // With a directory argument and no --recursive, restic lists the directory itself and its direct children.
+        var dir = directory.Length > 1 ? directory.TrimEnd('/') : "/";
+        var nodes = new List<SnapshotNode>();
+        var result = await RunAsync(repository, [.. LsArgs(repository, snapshotId), dir], null, cancellationToken, line =>
+        {
+            if (!TryParse(line, out var doc))
+                return;
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (GetString(root, "struct_type") != "node" || GetString(root, "path") is not { } path || path == dir)
+                    return;
+                var type = GetString(root, "type") switch
+                {
+                    "file" => SnapshotNodeType.File,
+                    "dir" => SnapshotNodeType.Directory,
+                    "symlink" => SnapshotNodeType.Symlink,
+                    _ => SnapshotNodeType.Other,
+                };
+                DateTimeOffset? mtime = GetString(root, "mtime") is { } m
+                    && DateTimeOffset.TryParse(m, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ? parsed : null;
+                nodes.Add(new SnapshotNode(GetString(root, "name") ?? path, path, type, GetLong(root, "size"), mtime));
+            }
+        });
+        if (result.ExitCode != ResticExitCodes.Success)
+            throw ResticErrors.FromExitCode("ls", result.ExitCode, result.StderrTail);
+        return nodes
+            .OrderBy(n => n.Type == SnapshotNodeType.Directory ? 0 : 1)
+            .ThenBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> LsArgs(RepositoryTarget repository, string snapshotId) =>
+        repository.ReadOnly ? ["ls", "--json", "--no-lock", snapshotId] : ["ls", "--json", snapshotId];
 
     public async Task ForgetAsync(ForgetRequest request, CancellationToken cancellationToken)
     {

@@ -21,6 +21,9 @@ using Microsoft.Extensions.Options;
 
 namespace Dupli.Server.Api;
 
+// Dupli.Agent (namespace, from Agent.Core) would otherwise shadow the entity.
+using Agent = Dupli.Server.Domain.Agents.Agent;
+
 /// <summary>
 /// Operator API under <c>/api/admin</c>: backend of the web UI (session cookie + antiforgery) and of
 /// automation (admin key header).
@@ -89,6 +92,8 @@ public static class AdminApi
         admin.MapPost("/releases/agent", CreateAgentReleaseAsync);
         admin.MapPost("/releases/agent/import", ImportAgentReleaseAsync);
         admin.MapPost("/releases/{id:guid}/make-current", MakeCurrentAsync);
+
+        admin.MapRestoreApi();
     }
 
     private static async Task<IResult> CreateStorageTargetAsync(CreateStorageTargetRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
@@ -579,7 +584,7 @@ public static class AdminApi
         return next is { } n ? new DateTimeOffset(n, TimeSpan.Zero) : null;
     }
 
-    private static JobDto ToDto(Job j) => new(
+    internal static JobDto ToDto(Job j) => new(
         j.Id, j.AgentId, j.PolicyId, j.Type, j.Trigger, j.State, j.CreatedAt, j.ScheduledAt, j.ExpiresAt,
         j.StartedAt, j.CompletedAt, j.CancelRequested, j.Error,
         j.ResultItems is null ? [] : JsonSerializer.Deserialize<List<JobItemResultDto>>(j.ResultItems, DupliJson.Options) ?? []);

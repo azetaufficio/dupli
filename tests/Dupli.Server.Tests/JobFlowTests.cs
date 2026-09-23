@@ -204,4 +204,47 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.IsType<PostgresSourceDto>(loaded.Sources.Single(s => s.SourceId == "pg"));
         Assert.NotNull(loaded.NextRunAt);
     }
+
+    [Fact]
+    public async Task Only_database_selection_round_trips_and_needs_a_list()
+    {
+        var agent = await _server.CreateAgentAsync();
+        PolicyRequest WithSelection(params string[] databases) => Policy() with
+        {
+            Sources =
+            [
+                new PostgresSourceDto
+                {
+                    SourceId = "pg", Username = "postgres", PasswordSecret = "pg-main",
+                    DatabaseSelection = DatabaseSelection.Only, IncludeDatabases = databases,
+                },
+            ],
+        };
+
+        var empty = await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/policies", WithSelection());
+        Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+
+        var created = await CreatePolicyAsync(agent.Id, WithSelection("postgres", "erp"));
+        var pg = Assert.IsType<PostgresSourceDto>(Assert.Single(created.Sources));
+        Assert.Equal(DatabaseSelection.Only, pg.DatabaseSelection);
+        Assert.Equal(["postgres", "erp"], pg.IncludeDatabases);
+    }
+
+    [Theory]
+    [InlineData("not-hex", null, null)]
+    [InlineData("abcdef12", "relative/path", null)]
+    [InlineData("abcdef12", "/C/Data/../Windows", null)]
+    [InlineData("abcdef12", null, "relative\\dir")]
+    public async Task Invalid_restore_request_is_rejected_before_reading_the_repository(
+        string snapshotId, string? include, string? target)
+    {
+        var agent = await _server.CreateAgentAsync();
+        var response = await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/restores", new CreateRestoreRequest
+        {
+            SnapshotId = snapshotId,
+            Includes = include is null ? [] : [include],
+            TargetDirectory = target,
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

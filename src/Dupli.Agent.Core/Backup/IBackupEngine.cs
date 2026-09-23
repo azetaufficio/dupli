@@ -18,6 +18,13 @@ public interface IBackupEngine
         string snapshotId,
         CancellationToken cancellationToken);
 
+    /// <summary>Direct children of <paramref name="directory"/> (a restic path, "/" for the root) in a snapshot.</summary>
+    Task<IReadOnlyList<SnapshotNode>> ListDirectoryAsync(
+        RepositoryTarget repository,
+        string snapshotId,
+        string directory,
+        CancellationToken cancellationToken);
+
     Task RestoreAsync(RestoreRequest request, CancellationToken cancellationToken);
 
     Task ForgetAsync(ForgetRequest request, CancellationToken cancellationToken);

@@ -79,5 +79,18 @@ public sealed class RestoreGuardTests : IDisposable
         Assert.DoesNotContain(source, resolved, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Target_must_be_new_or_empty()
+    {
+        var target = _tmp.Combine("restore", "job1");
+        RestoreGuard.EnsureEmpty(target);
+
+        Directory.CreateDirectory(target);
+        RestoreGuard.EnsureEmpty(target);
+
+        File.WriteAllText(Path.Combine(target, "existing.txt"), "x");
+        Assert.Throws<InvalidOperationException>(() => RestoreGuard.EnsureEmpty(target));
+    }
+
     public void Dispose() => _tmp.Dispose();
 }

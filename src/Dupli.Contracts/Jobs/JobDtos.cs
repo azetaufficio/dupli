@@ -21,6 +21,7 @@ public sealed record AgentJobDto
 [JsonDerivedType(typeof(RepositoryCheckJobPayload), "repositoryCheck")]
 [JsonDerivedType(typeof(RestoreTestJobPayload), "restoreTest")]
 [JsonDerivedType(typeof(RestartAgentJobPayload), "restartAgent")]
+[JsonDerivedType(typeof(RestoreJobPayload), "restore")]
 public abstract record JobPayloadDto;
 
 public sealed record BackupJobPayload : JobPayloadDto
@@ -58,6 +59,38 @@ public sealed record RestoreTestJobPayload : JobPayloadDto
 
     /// <summary>Files sampled per directory source.</summary>
     public int SampleFiles { get; init; } = 20;
+}
+
+/// <summary>
+/// Restores a snapshot (all of it, or <see cref="Includes"/>) into an alternative directory on the VM, never over a
+/// backed-up path. For a PostgreSQL dump, optionally <c>pg_restore</c> into a database that must not exist yet.
+/// </summary>
+public sealed record RestoreJobPayload : JobPayloadDto
+{
+    public required string SnapshotId { get; init; }
+
+    /// <summary>Restic paths to restore (files or directories); empty = the whole snapshot.</summary>
+    public IReadOnlyList<string> Includes { get; init; } = [];
+
+    /// <summary>Must not exist or be empty. Null = default location (<c>C:\DupliRestore\&lt;job-id&gt;</c>).</summary>
+    public string? TargetDirectory { get; init; }
+
+    public PostgresRestoreDto? Postgres { get; init; }
+
+    /// <summary>The agent's policies: the target may not overlap any of their paths.</summary>
+    public IReadOnlyList<PolicySpecDto> Policies { get; init; } = [];
+}
+
+/// <summary>After the files restore, create <see cref="NewDatabase"/> and <c>pg_restore</c> the dump of <see cref="Database"/> into it.</summary>
+public sealed record PostgresRestoreDto
+{
+    /// <summary>Connection of the policy source that produced the dump.</summary>
+    public required PostgresSourceDto Source { get; init; }
+
+    /// <summary>Database of the dump (<c>db=</c> tag): the file restored is <c>&lt;Database&gt;.dump</c>.</summary>
+    public required string Database { get; init; }
+
+    public required string NewDatabase { get; init; }
 }
 
 /// <summary>The agent reports success, then exits so the service manager restarts it.</summary>
@@ -113,4 +146,7 @@ public sealed record JobItemResultDto
     public long BytesAdded { get; init; }
     public IReadOnlyList<string> Warnings { get; init; } = [];
     public string? Error { get; init; }
+
+    /// <summary>Where the item ended up (restore: target directory or database).</summary>
+    public string? Location { get; init; }
 }

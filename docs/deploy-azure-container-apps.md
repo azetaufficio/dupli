@@ -16,12 +16,14 @@ Browser operatori ──HTTPS──┐
                            ▼
 Agent Windows ──HTTPS──► Azure Container Apps (1 replica, ingress esterno, TLS gestito)
                            │  container dupli-server (porta 8080)
-                           │   ├─ /var/lib/dupli/keys  ← Azure Files (key ring Data Protection)
-                           │   └─ /var/lib/dupli/tools ← effimero (cache mirror restic)
+                           │   ├─ /var/lib/dupli/tools ← effimero (cache mirror restic + restic del server)
+                           │   └─ /var/lib/dupli/cache ← effimero (cache restic per il browse degli snapshot)
+                           ├──► Azure Key Vault (key ring Data Protection, managed identity)
                            ▼
               Azure Database for PostgreSQL – Flexible Server (DB "dupli")
 
 Agent Windows ──HTTPS──► S3 (Wasabi / B2): 1 repository restic per VM
+Server ─────────HTTPS──► S3 (sola lettura, --no-lock): lista e browse degli snapshot dalla UI
 ```
 
 Vincoli da rispettare (dipendono da com'è fatto il server oggi):
@@ -29,11 +31,11 @@ Vincoli da rispettare (dipendono da com'è fatto il server oggi):
 | Vincolo | Motivo |
 |---|---|
 | **Esattamente 1 replica** (`minReplicas = maxReplicas = 1`) | Scheduler, sweeper e alert girano dentro il processo: con 2 repliche si avrebbero notifiche doppie e, senza `SigningKey` configurata, token agent non validi tra repliche. Con 0 repliche lo scheduler non gira. |
-| **Key ring Data Protection su volume persistente, separato dal DB** | Cifra password dei repository e chiavi S3 in escrow. Se si perde il key ring, i segreti in DB non sono più decifrabili: va salvato a parte. |
+| **Key ring Data Protection in Key Vault, separato dal DB** | Cifra password dei repository e chiavi S3 in escrow. Se si perde il key ring, i segreti in DB non sono più decifrabili. In Key Vault è cifrato a riposo, accessibile solo alla managed identity dell'app, e protetto da soft delete + purge protection. |
 | **Scegliere l'URL definitivo prima di installare agent** | L'URL del server viene salvato in `agent.json` all'enrollment. Se il dominio cambia dopo, gli agent vanno ri-enrollati (o `agent.json` modificato a mano). |
 | **HTTPS obbligatorio** | Il login OIDC con Entra ID richiede redirect URI `https://`. ACA termina il TLS e passa `X-Forwarded-Proto`, che il server usa. |
 
-Costo indicativo (verificare con il calcolatore Azure): ACA consumption con 1 replica sempre attiva da 0,5 vCPU / 1 GiB, più PostgreSQL Flexible Burstable B1ms, più pochi centesimi di Azure Files e Log Analytics.
+Costo indicativo (verificare con il calcolatore Azure): ACA consumption con 1 replica sempre attiva da 0,5 vCPU / 1 GiB, più PostgreSQL Flexible Burstable B1ms, più pochi centesimi di Key Vault e Log Analytics.
 
 ---
 
@@ -47,7 +49,8 @@ Costo indicativo (verificare con il calcolatore Azure): ACA consumption con 1 re
   az provider register --namespace Microsoft.App
   az provider register --namespace Microsoft.OperationalInsights
   az provider register --namespace Microsoft.DBforPostgreSQL
-  az provider register --namespace Microsoft.Storage
+  az provider register --namespace Microsoft.KeyVault
+  az provider register --namespace Microsoft.ManagedIdentity
   ```
 - `openssl` ed `envsubst` (pacchetto `gettext`) sulla macchina da cui lanci i comandi (in Cloud Shell ci sono già).
 - Il codice M3 **committato e pushato su `main`**: la CI (job `docker`) pubblica l'immagine `ghcr.io/azetaufficio/dupli-server:sha-<commit>` e l'exe dell'agent come artifact `dupli-agent-win-x64`.
@@ -60,7 +63,8 @@ LOC=italynorth                 # oppure westeurope
 ENV_NAME=dupli-env
 APP=dupli-server
 PG=dupli-pg-$RANDOM            # nome globale univoco
-STG=duplikeys$RANDOM           # 3-24 caratteri minuscoli/numeri, univoco
+KV=dupli-kv-$RANDOM            # 3-24 caratteri, nome globale univoco
+IDENTITY=dupli-server-id
 PG_ADMIN=dupliadmin
 PG_PASS="$(openssl rand -base64 24 | tr -d '/+=')"
 IMAGE=ghcr.io/azetaufficio/dupli-server:sha-<commit>   # tag immutabile, NON latest
@@ -115,18 +119,26 @@ Se `VerifyFull` fallisce per un problema di catena di certificati, ripiega su `S
 
 ---
 
-## 4. Storage per il key ring (Azure Files)
+## 4. Key Vault per il key ring + managed identity
+
+Il key ring Data Protection (le chiavi che cifrano password dei repository e chiavi S3 in escrow, e i cookie di sessione) viene salvato come secret del Key Vault, un secret per chiave (`dupli-dataprotection-key-<guid>`). L'app accede con una managed identity **user-assigned**, creata prima dell'app, così il permesso c'è già al primo avvio: il server carica il key ring all'avvio e, se non ci riesce, esce con `Fatal:`.
 
 ```bash
-az storage account create -g $RG -n $STG -l $LOC --sku Standard_LRS --kind StorageV2 \
-  --min-tls-version TLS1_2 --allow-blob-public-access false
+az keyvault create -g $RG -n $KV -l $LOC   --enable-rbac-authorization true --enable-purge-protection true --retention-days 90
 
-az storage share-rm create -g $RG --storage-account $STG -n dupli-keys --quota 1
+az identity create -g $RG -n $IDENTITY
+IDENTITY_ID=$(az identity show -g $RG -n $IDENTITY --query id -o tsv)
+IDENTITY_CLIENT_ID=$(az identity show -g $RG -n $IDENTITY --query clientId -o tsv)
+IDENTITY_PRINCIPAL_ID=$(az identity show -g $RG -n $IDENTITY --query principalId -o tsv)
 
-STG_KEY=$(az storage account keys list -g $RG -n $STG --query "[0].value" -o tsv)
+KV_ID=$(az keyvault show -g $RG -n $KV --query id -o tsv)
+az role assignment create --assignee-object-id $IDENTITY_PRINCIPAL_ID --assignee-principal-type ServicePrincipal \
+  --role "Key Vault Secrets Officer" --scope $KV_ID
 ```
 
-Proteggi la share dalla cancellazione accidentale: soft delete delle file share (attivo di default sugli account nuovi, controlla) e un **resource lock** sul resource group o sull'account. Dopo il primo avvio scarica una copia dei file `key-*.xml` e mettila nel password vault: è il backup del key ring.
+Il ruolo serve per leggere, elencare e scrivere secret. Data Protection non cancella mai chiavi, quindi l'app non ha bisogno di altro. Con purge protection attiva, un secret cancellato per errore resta recuperabile per 90 giorni. Metti comunque un **resource lock** (`CanNotDelete`) sul vault.
+
+> Alternativa senza Key Vault: `DataProtection__KeyStore=FileSystem` con una share Azure Files montata su `/var/lib/dupli/keys` (è il default in compose). Le chiavi però restano in chiaro sulla share: chi legge la share può decifrare i segreti in escrow.
 
 ---
 
@@ -134,11 +146,6 @@ Proteggi la share dalla cancellazione accidentale: soft delete delle file share 
 
 ```bash
 az containerapp env create -g $RG -n $ENV_NAME -l $LOC
-
-az containerapp env storage set -g $RG -n $ENV_NAME \
-  --storage-name dupli-keys \
-  --azure-file-account-name $STG --azure-file-account-key "$STG_KEY" \
-  --azure-file-share-name dupli-keys --access-mode ReadWrite
 
 ENV_ID=$(az containerapp env show -g $RG -n $ENV_NAME --query id -o tsv)
 DOMAIN=$(az containerapp env show -g $RG -n $ENV_NAME --query properties.defaultDomain -o tsv)
@@ -198,7 +205,7 @@ Il template del punto 8 usa Office 365. Per SMTP sostituisci il blocco env relat
 Genera la chiave di firma dei token agent. È opzionale, ma se la fissi un riavvio del server non costringe gli agent a riautenticarsi:
 ```bash
 SIGNING_KEY=$(openssl rand -base64 32)
-export LOC ENV_ID IMAGE FQDN DB_CONNECTION SIGNING_KEY ENTRA_TENANT_ID ENTRA_CLIENT_ID ENTRA_CLIENT_SECRET
+export LOC ENV_ID IMAGE FQDN KV IDENTITY_ID IDENTITY_CLIENT_ID DB_CONNECTION SIGNING_KEY ENTRA_TENANT_ID ENTRA_CLIENT_ID ENTRA_CLIENT_SECRET
 export ENTRA_REQUIRED_ROLE=""            # oppure Dupli.Operator
 export O365_TENANT_ID=... O365_CLIENT_ID=... O365_CLIENT_SECRET=... O365_FROM=dupli@tuodominio.it O365_TO=ops@tuodominio.it
 ```
@@ -207,6 +214,11 @@ Il template è nel repo: `deploy/azure/containerapp.template.yaml`, riportato qu
 
 ```yaml
 location: ${LOC}
+identity:
+  # Reads and writes the Data Protection key ring in Key Vault (role Key Vault Secrets Officer on the vault).
+  type: UserAssigned
+  userAssignedIdentities:
+    ${IDENTITY_ID}: {}
 properties:
   managedEnvironmentId: ${ENV_ID}
   configuration:
@@ -239,6 +251,14 @@ properties:
             value: https://${FQDN}
           - name: Dupli__Agents__SigningKey
             secretRef: agents-signing-key
+          - name: DataProtection__KeyStore
+            value: AzureKeyVault
+          - name: DataProtection__AzureKeyVault__VaultUri
+            value: https://${KV}.vault.azure.net/
+          - name: DataProtection__AzureKeyVault__Credential
+            value: ManagedIdentity
+          - name: DataProtection__AzureKeyVault__ClientId
+            value: ${IDENTITY_CLIENT_ID}
           - name: Dupli__Auth__Mode
             value: EntraId
           - name: Dupli__Auth__EntraId__TenantId
@@ -274,18 +294,9 @@ properties:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
-        volumeMounts:
-          - volumeName: keys
-            mountPath: /var/lib/dupli/keys
     scale:
       minReplicas: 1
       maxReplicas: 1
-    volumes:
-      - name: keys
-        storageType: AzureFile
-        storageName: dupli-keys
-        # Il container gira come utente "app" (uid 1654): la share deve essere scrivibile da lui.
-        mountOptions: "uid=1654,gid=1654,dir_mode=0700,file_mode=0600"
 ```
 
 Il template non imposta `Dupli__Admin__ApiKey`, quindi la chiave admin resta disattivata: in produzione si usa solo il login Entra. Se ti serve per degli script, aggiungila come secret.
@@ -297,8 +308,6 @@ az containerapp create -g $RG -n $APP --yaml /tmp/dupli-app.yaml
 rm /tmp/dupli-app.yaml
 ```
 
-Se la CLI rifiuta `mountOptions` (versioni vecchie), togli la riga, crea l'app e controlla i log. Se compare un errore di permessi su `/var/lib/dupli/keys`, aggiorna la CLI e riapplica.
-
 ### Verifica del deploy
 ```bash
 curl -s https://$FQDN/health                    # {"status":"ok"}
@@ -306,7 +315,7 @@ az containerapp logs show -g $RG -n $APP --follow --tail 100
 ```
 Nei log del primo avvio devi vedere:
 - `Applied database script ...0001_initial.sql` e `...0002_m3.sql` (le migrazioni DbUp sul DB Azure);
-- **nessun** errore Data Protection sulla directory keys;
+- **nessun** errore Data Protection o Key Vault (`403 Forbidden` = ruolo mancante sulla managed identity, vedi punto 4);
 - nessun `Fatal:`. In quel caso il container esce e ACA lo riavvia: leggi il messaggio, di solito è configurazione mancante.
 
 Poi dal browser:
@@ -314,7 +323,11 @@ Poi dal browser:
 2. In alto a destra compare il tuo nome; *Sign out* ti riporta al login.
 3. Un utente non assegnato all'app viene bloccato da Entra (o vede "not authorized" se usi il ruolo).
 
-Dopo il primo avvio controlla che la share `dupli-keys` contenga un file `key-<guid>.xml`: portale → Storage account → File shares. Salvane una copia nel vault.
+Dopo il primo avvio controlla che il vault contenga il key ring:
+```bash
+az keyvault secret list --vault-name $KV --query "[].name" -o tsv   # dupli-dataprotection-key-<guid>
+```
+Per leggere i secret dal tuo utente serve un ruolo sul vault (es. *Key Vault Secrets User*): la sola appartenenza al resource group non basta.
 
 ---
 
@@ -347,6 +360,7 @@ Per ogni VM:
    - Wasabi: sub-user con una policy IAM su `arn:aws:s3:::dupli-backups/agents/vm-01/*`, più `ListBucket` con condizione sul prefisso;
    - B2: application key limitata al bucket, con *File name prefix* = `agents/vm-01/`.
 2. Obiettivo anti-ransomware: la chiave dell'agent **non** deve poter cancellare definitivamente le versioni (niente `DeleteObjectVersion` / permessi di bypass). Verifica con il provider cosa comporta per `restic prune`: vedi HANDOFF.
+3. La stessa chiave la usa anche il server (in sola lettura) per mostrare snapshot e file nella tab *Snapshots*: l'egress del Container App verso l'endpoint S3 deve essere aperto. Se il server raggiunge S3 da un URL diverso da quello degli agent (endpoint privato), configura `Dupli__Restore__EndpointOverrides__0__From` / `__To`.
 
 ---
 
@@ -396,19 +410,20 @@ Procedura:
 
 1. Agent → **New policy**:
    - cartelle, per esempio `D:\Dati` (una per riga), con eventuali esclusioni;
-   - PostgreSQL: host `localhost`, porta, utente, *Password secret* `pg-main`, database esclusi;
+   - PostgreSQL: host `localhost`, porta, utente, *Password secret* `pg-main`; database: *tutti tranne gli esclusi* (template e `postgres` sempre esclusi) oppure *solo quelli elencati* (anche `postgres`; un DB elencato che non esiste fa fallire il backup);
    - cron, per esempio `0 2 * * *` con fuso `Europe/Rome`: l'anteprima mostra le prossime esecuzioni;
    - retention daily/weekly/monthly.
 2. **Run now** sulla policy. Nella tab *Jobs* lo stato passa Pending → Running → Succeeded; nella tab *Backup history* compaiono snapshot e byte.
 3. **Run restore test**: nella tab *Restore tests* ogni file del campione e ogni DB devono risultare Succeeded.
 4. **Check repository**: Succeeded.
-5. Restore manuale di prova sulla VM (non sovrascrive mai le sorgenti):
+5. Restore dalla UI: tab *Snapshots* → *Browse* su uno snapshot di cartelle, seleziona file o cartelle (oppure niente = tutto) → *Restore*. Il job va sull'agent e scrive in `C:\DupliRestore\<job-id>` (o in una cartella a scelta, nuova o vuota, fuori dai percorsi sotto backup). Per uno snapshot PostgreSQL c'è anche *Also load the dump into a new database*: crea un DB **nuovo** (il nome va scritto due volte) e ci fa `pg_restore`; non tocca mai un DB esistente.
+6. Restore manuale di prova sulla VM (non sovrascrive mai le sorgenti):
    ```powershell
    & $exe snapshots
    & $exe restore --snapshot <id>          # finisce in C:\DupliRestore\<id>
    ```
-6. **Restart agent** dalla UI: il job va a Succeeded, il servizio si riavvia da solo entro pochi secondi e l'agent torna online.
-7. Test di errore (utili per vedere gli alert via email):
+7. **Restart agent** dalla UI: il job va a Succeeded, il servizio si riavvia da solo entro pochi secondi e l'agent torna online.
+8. Test di errore (utili per vedere gli alert via email):
    - password PG sbagliata (`secret set pg-main` con un valore errato, poi Run now): job Failed e alert *BackupFailed*;
    - cartella inesistente nella policy: item Failed, gli altri item vanno avanti;
    - servizio fermo per più di 5 minuti (`sc.exe stop DupliAgent`): alert *AgentOffline* e, al riavvio, email "RESOLVED";
@@ -425,6 +440,7 @@ Procedura:
   3. Gli agent del canale (o con la versione fissata nella tab *Updates* dell'agent) scaricano la release quando sono inattivi, verificano lo sha256 e passano la mano al Launcher. Se la nuova versione crasha o non risponde entro 5 minuti, il Launcher torna alla precedente, l'agent lo segnala e parte l'alert *AgentUpdateFailed*. Quella versione non viene più ritentata su quella VM.
   4. restic si aggiorna allo stesso modo: rendi corrente una nuova release restic; l'agent la installa e la prova sul repository prima di usarla.
   5. Il Launcher stesso non si aggiorna da solo: per aggiornarlo, lancia sulla VM `dupli-agent.exe install` (senza token) con l'exe nuovo. Ferma e riavvia il servizio da solo.
+- **Rate limiting:** gli endpoint anonimi esposti su internet (`/api/agents/register`, `/api/agents/token`, `/bff/login`) accettano 30 richieste al minuto per IP client (preso da `X-Forwarded-For` dell'ingress), poi rispondono `429` con `Retry-After`. Gli agent lo trattano come errore temporaneo e ritentano. Se hai molte VM dietro lo stesso IP pubblico, alza `Dupli__RateLimiting__PermitLimit`.
 - **Rinnovo segreti:** client secret Entra (scadenza impostata al punto 6), secret del mailer, password PG. Si aggiornano con `az containerapp secret set` e poi `az containerapp revision restart`.
-- **Backup da fare fuori da Dupli:** DB PostgreSQL (backup automatici Azure) **e** key ring (copia dei `key-*.xml`). Il DB senza key ring non basta per recuperare le password dei repository. Tieni comunque nel vault anche le password dei repository restic delle VM critiche.
+- **Backup da fare fuori da Dupli:** DB PostgreSQL (backup automatici Azure) **e** key ring (i secret `dupli-dataprotection-*` del Key Vault: soft delete + purge protection; per una copia fuori da Azure `az keyvault secret backup`). Il DB senza key ring non basta per recuperare le password dei repository. Tieni comunque nel vault anche le password dei repository restic delle VM critiche.
 - **Rimozione agent da una VM:** `& $exe uninstall` (ferma ed elimina il servizio), poi *Disable* nella UI.

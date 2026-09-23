@@ -83,25 +83,34 @@ public sealed class ResticToolManager(
 
     private async Task DownloadVerifiedAsync(ToolManifestDto manifest, string destination, CancellationToken ct)
     {
-        try
-        {
-            using var response = await http.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
-
-            await using (var source = await response.Content.ReadAsStreamAsync(ct))
-            await using (var file = File.Create(destination))
-                await source.CopyToAsync(file, ct);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw BackupException.Transient($"Download of restic {manifest.Version} failed: {ex.Message}", ex);
-        }
+        // file://: the server installs restic for itself from its own verified mirror cache.
+        if (Uri.TryCreate(manifest.DownloadUrl, UriKind.Absolute, out var uri) && uri.IsFile)
+            File.Copy(uri.LocalPath, destination, overwrite: true);
+        else
+            await DownloadAsync(manifest, destination, ct);
 
         await using var stream = File.OpenRead(destination);
         var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
         if (!actual.Equals(manifest.Sha256, StringComparison.OrdinalIgnoreCase))
             throw BackupException.Permanent(
                 $"SHA256 mismatch for restic {manifest.Version}: expected {manifest.Sha256}, got {actual}");
+    }
+
+    private async Task DownloadAsync(ToolManifestDto manifest, string destination, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await http.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+
+            await using var source = await response.Content.ReadAsStreamAsync(ct);
+            await using var file = File.Create(destination);
+            await source.CopyToAsync(file, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw BackupException.Transient($"Download of restic {manifest.Version} failed: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
