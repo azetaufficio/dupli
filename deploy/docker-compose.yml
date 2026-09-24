@@ -31,14 +31,15 @@ services:
     environment:
       ConnectionStrings__Dupli: Host=postgres;Database=dupli;Username=dupli;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable
       Dupli__PublicUrl: https://${DUPLI_HOST:?set DUPLI_HOST}
-      # Optional automation key (header X-Dupli-Admin-Key); empty disables key access.
+      # Optional automation key (header X-Dupli-Admin-Key) and /admin break-glass page; empty disables both.
       Dupli__Admin__ApiKey: ${DUPLI_ADMIN_API_KEY:-}
       # Operator login for the web UI (Microsoft Entra ID, server-side OIDC).
       Dupli__Auth__Mode: ${DUPLI_AUTH_MODE:-EntraId}
       Dupli__Auth__EntraId__TenantId: ${ENTRA_TENANT_ID:-}
       Dupli__Auth__EntraId__ClientId: ${ENTRA_CLIENT_ID:-}
       Dupli__Auth__EntraId__ClientSecret: ${ENTRA_CLIENT_SECRET:-}
-      Dupli__Auth__EntraId__RequiredRole: ${ENTRA_REQUIRED_ROLE:-}
+      # First owner, required while no operator user exists. Everyone else is invited from the Users page.
+      Dupli__Auth__BootstrapOwnerEmail: ${DUPLI_BOOTSTRAP_OWNER_EMAIL:-}
       # Alert e-mail channel: Smtp or Office365 (Microsoft Graph).
       Notifications__Channel: ${NOTIFICATIONS_CHANNEL:-Smtp}
       Notifications__Smtp__Host: ${SMTP_HOST:-}

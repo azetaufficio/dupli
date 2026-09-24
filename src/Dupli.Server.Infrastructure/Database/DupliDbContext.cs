@@ -1,6 +1,7 @@
 using Dupli.Server.Domain.Agents;
 using Dupli.Server.Domain.Jobs;
 using Dupli.Server.Domain.Monitoring;
+using Dupli.Server.Domain.Operators;
 using Dupli.Server.Domain.Policies;
 using Dupli.Server.Domain.Tools;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,7 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
     public DbSet<Agent> Agents => Set<Agent>();
     public DbSet<EnrollmentToken> EnrollmentTokens => Set<EnrollmentToken>();
     public DbSet<StorageTarget> StorageTargets => Set<StorageTarget>();
+    public DbSet<PgConnection> PgConnections => Set<PgConnection>();
     public DbSet<BackupPolicy> Policies => Set<BackupPolicy>();
     public DbSet<BackupSource> Sources => Set<BackupSource>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -23,6 +25,7 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
     public DbSet<AgentLog> Logs => Set<AgentLog>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<Alert> Alerts => Set<Alert>();
+    public DbSet<OperatorUser> OperatorUsers => Set<OperatorUser>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -38,6 +41,12 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
         });
 
         b.Entity<EnrollmentToken>().ToTable("enrollment_token");
+
+        b.Entity<PgConnection>(e =>
+        {
+            e.ToTable("pg_connection");
+            e.HasOne<Agent>().WithMany().HasForeignKey(x => x.AgentId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         b.Entity<BackupPolicy>(e =>
         {
@@ -82,6 +91,14 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
         {
             e.ToTable("alert");
             e.Property(x => x.Kind).HasConversion<string>();
+        });
+
+        b.Entity<OperatorUser>(e =>
+        {
+            e.ToTable("operator_user");
+            e.Property(x => x.Role).HasConversion<string>();
+            e.Ignore(x => x.IsBound);
+            e.Ignore(x => x.IsActive);
         });
     }
 }

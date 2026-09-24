@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <style>
+    .back { fill: #93b4f5; }
+    .front { fill: #2563eb; }
+    @media (prefers-color-scheme: dark) {
+      .back { fill: #274a8a; }
+      .front { fill: #4f8cff; }
+    }
+  </style>
+  <rect class="back" x="28" y="28" width="64" height="64" rx="11"/>
+  <rect class="front" x="4" y="4" width="64" height="64" rx="11"/>
+</svg>

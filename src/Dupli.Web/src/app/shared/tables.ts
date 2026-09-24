@@ -1,5 +1,6 @@
-import { Component, input, output, signal } from '@angular/core';
+import { Component, inject, input, output, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { AuthService } from '../core/auth.service';
 import { Alert, Job, LogEntry, Run, TERMINAL_STATES } from '../core/models';
 import { Badge } from './badge';
 import { BytesPipe, DateTimePipe, DurationPipe, RelativeTimePipe } from './format';
@@ -54,7 +55,7 @@ export type NameLookup = Record<string, string>;
                 <td class="nowrap">{{ job.startedAt | duration: job.completedAt }}</td>
                 <td class="muted">{{ job.error }}</td>
                 <td class="num">
-                  @if (!isTerminal(job) && !job.cancelRequested) {
+                  @if (!isTerminal(job) && !job.cancelRequested && auth.canOperate()) {
                     <button type="button" class="btn small danger" (click)="cancel.emit(job)">
                       Cancel
                     </button>
@@ -69,6 +70,7 @@ export type NameLookup = Record<string, string>;
   `,
 })
 export class JobsTable {
+  protected readonly auth = inject(AuthService);
   readonly jobs = input.required<Job[]>();
   readonly agents = input<NameLookup>({});
   readonly policies = input<NameLookup>({});

@@ -3,6 +3,7 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
+import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import { Agent, CreateAgentRequest, StorageTarget } from '../core/models';
 import { agentUpdateStatus } from '../shared/agent-update-status';
@@ -19,11 +20,13 @@ import { lookup } from '../shared/tables';
         <h1>Agents</h1>
         <p class="muted">One agent per Windows VM, each with its own restic repository.</p>
       </div>
-      <div class="toolbar">
-        <button type="button" class="btn primary" (click)="showForm.set(!showForm())">
-          {{ showForm() ? 'Close' : 'New agent' }}
-        </button>
-      </div>
+      @if (auth.canOperate()) {
+        <div class="toolbar">
+          <button type="button" class="btn primary" (click)="showForm.set(!showForm())">
+            {{ showForm() ? 'Close' : 'New agent' }}
+          </button>
+        </div>
+      }
     </div>
 
     @if (showForm()) {
@@ -152,6 +155,7 @@ import { lookup } from '../shared/tables';
   `,
 })
 export class AgentsPage {
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
 

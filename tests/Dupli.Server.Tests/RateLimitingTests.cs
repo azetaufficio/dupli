@@ -8,7 +8,7 @@ namespace Dupli.Server.Tests;
 [Collection(ServerCollection.Name)]
 public sealed class RateLimitingTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private readonly DupliTestServer _server = new(postgres, "Development", new Dictionary<string, string?>
+    private readonly DupliTestServer _server = new(postgres, "EntraId", new Dictionary<string, string?>
     {
         ["Dupli:RateLimiting:PermitLimit"] = "2",
         ["Dupli:RateLimiting:Window"] = "00:10:00",

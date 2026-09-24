@@ -100,7 +100,13 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
 
 var app = builder.Build();
 
-DatabaseMigrator.Migrate(connectionString, app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Dupli.Migrations"));
+var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+DatabaseMigrator.Migrate(connectionString, loggerFactory.CreateLogger("Dupli.Migrations"));
+
+var authLogger = loggerFactory.CreateLogger("Dupli.Auth");
+await OperatorDirectory.EnsureBootstrapConfiguredAsync(app.Services, serverOptions, authLogger);
+if (!string.IsNullOrWhiteSpace(app.Configuration["Dupli:Auth:EntraId:RequiredRole"]))
+    authLogger.LogWarning("Dupli:Auth:EntraId:RequiredRole is no longer used and is ignored: access is managed on the Users page");
 
 // Load the key ring now: an unreachable Key Vault or unwritable key directory must fail the startup, not every
 // request that later unprotects a secret or a session cookie.
@@ -114,6 +120,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseOperatorLogContext();
 app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();

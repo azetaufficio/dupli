@@ -54,8 +54,8 @@ properties:
             value: ${ENTRA_CLIENT_ID}
           - name: Dupli__Auth__EntraId__ClientSecret
             secretRef: entra-client-secret
-          - name: Dupli__Auth__EntraId__RequiredRole
-            value: "${ENTRA_REQUIRED_ROLE}"
+          - name: Dupli__Auth__BootstrapOwnerEmail
+            value: ${DUPLI_BOOTSTRAP_OWNER_EMAIL}
           - name: Notifications__Channel
             value: Office365
           - name: Notifications__Office365__TenantId

@@ -17,7 +17,7 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => _server.DisposeAsync().AsTask();
 
-    private static PolicyRequest Policy(string cron = "0 2 * * *") => new()
+    private static PolicyRequest Policy(Guid connectionId, string cron = "0 2 * * *") => new()
     {
         Name = "nightly",
         Cron = cron,
@@ -25,13 +25,30 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         Retention = new RetentionDto { KeepDaily = 7, KeepWeekly = 4, KeepMonthly = 6 },
         Sources =
         [
-            new DirectorySourceDto { SourceId = "docs", Paths = [@"D:\Docs"], Excludes = ["*.tmp"] },
-            new PostgresSourceDto { SourceId = "pg", Username = "postgres", PasswordSecret = "pg-main", ExcludeDatabases = ["scratch"] },
+            new PolicyDirectorySourceDto { SourceId = "docs", Paths = [@"D:\Docs"], Excludes = ["*.tmp"] },
+            new PolicyPostgresSourceDto { SourceId = "pg", ConnectionId = connectionId, ExcludeDatabases = ["scratch"] },
         ],
     };
 
-    private async Task<PolicyDto> CreatePolicyAsync(Guid agentId, PolicyRequest? request = null) =>
-        await (await _server.Admin().PostJsonAsync($"/api/admin/agents/{agentId}/policies", request ?? Policy())).ReadAsync<PolicyDto>();
+    private async Task<PgConnectionDto> CreateConnectionAsync(Guid agentId, string name = "postgres@localhost:5432") =>
+        await (await _server.Admin().PostJsonAsync($"/api/admin/agents/{agentId}/connections", new PgConnectionRequest
+        {
+            Name = name,
+            Host = "localhost",
+            Port = 5432,
+            Username = "postgres",
+            PasswordSecret = "pg-main",
+        })).ReadAsync<PgConnectionDto>();
+
+    private async Task<PolicyDto> CreatePolicyAsync(Guid agentId, PolicyRequest? request = null)
+    {
+        if (request is null)
+        {
+            var connection = await CreateConnectionAsync(agentId);
+            request = Policy(connection.Id);
+        }
+        return await (await _server.Admin().PostJsonAsync($"/api/admin/agents/{agentId}/policies", request)).ReadAsync<PolicyDto>();
+    }
 
     private static async Task<IReadOnlyList<AgentJobDto>> PollAsync(EnrolledAgent agent) =>
         await (await agent.Client.GetAsync($"/api/agents/{agent.AgentId}/jobs")).ReadAsync<List<AgentJobDto>>();
@@ -187,7 +204,7 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
     public async Task Invalid_policy_is_rejected(string cron)
     {
         var agent = await _server.CreateAgentAsync();
-        var response = await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/policies", Policy(cron));
+        var response = await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/policies", Policy(Guid.NewGuid(), cron));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -198,10 +215,10 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         var created = await CreatePolicyAsync(agent.Id);
         var loaded = await (await _server.Admin().GetAsync($"/api/admin/policies/{created.Id}")).ReadAsync<PolicyDto>();
 
-        var dir = Assert.IsType<DirectorySourceDto>(loaded.Sources.Single(s => s.SourceId == "docs"));
+        var dir = Assert.IsType<PolicyDirectorySourceDto>(loaded.Sources.Single(s => s.SourceId == "docs"));
         Assert.Equal([@"D:\Docs"], dir.Paths);
         Assert.Equal(["*.tmp"], dir.Excludes);
-        Assert.IsType<PostgresSourceDto>(loaded.Sources.Single(s => s.SourceId == "pg"));
+        Assert.IsType<PolicyPostgresSourceDto>(loaded.Sources.Single(s => s.SourceId == "pg"));
         Assert.NotNull(loaded.NextRunAt);
     }
 
@@ -209,13 +226,14 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
     public async Task Only_database_selection_round_trips_and_needs_a_list()
     {
         var agent = await _server.CreateAgentAsync();
-        PolicyRequest WithSelection(params string[] databases) => Policy() with
+        var connection = await CreateConnectionAsync(agent.Id);
+        PolicyRequest WithSelection(params string[] databases) => Policy(connection.Id) with
         {
             Sources =
             [
-                new PostgresSourceDto
+                new PolicyPostgresSourceDto
                 {
-                    SourceId = "pg", Username = "postgres", PasswordSecret = "pg-main",
+                    SourceId = "pg", ConnectionId = connection.Id,
                     DatabaseSelection = DatabaseSelection.Only, IncludeDatabases = databases,
                 },
             ],
@@ -225,7 +243,7 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
 
         var created = await CreatePolicyAsync(agent.Id, WithSelection("postgres", "erp"));
-        var pg = Assert.IsType<PostgresSourceDto>(Assert.Single(created.Sources));
+        var pg = Assert.IsType<PolicyPostgresSourceDto>(Assert.Single(created.Sources));
         Assert.Equal(DatabaseSelection.Only, pg.DatabaseSelection);
         Assert.Equal(["postgres", "erp"], pg.IncludeDatabases);
     }

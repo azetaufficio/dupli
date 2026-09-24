@@ -1,15 +1,22 @@
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Net.Http.Json;
 using Dupli.Contracts;
 using Dupli.Contracts.Agents;
 using Dupli.Server.Api;
 using Dupli.Server.Auth;
 using Dupli.Server.Domain.Monitoring;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Testcontainers.PostgreSql;
 
 namespace Dupli.Server.Tests.Infrastructure;
@@ -49,6 +56,8 @@ public sealed class CapturingNotificationChannel : INotificationChannel
 public sealed class DupliTestServer : WebApplicationFactory<Program>
 {
     public const string AdminKey = "test-admin-key";
+    public const string TenantId = "11111111-1111-1111-1111-111111111111";
+    public const string BootstrapOwnerEmail = "owner@dupli.test";
 
     private readonly string _connectionString;
     private readonly string _authMode;
@@ -77,13 +86,66 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
         builder.UseSetting("Dupli:Auth:Mode", _authMode);
         // Every test client shares one (null) remote IP: keep the anonymous rate limit out of the way.
         builder.UseSetting("Dupli:RateLimiting:PermitLimit", "100000");
+        if (_authMode == "EntraId")
+        {
+            builder.UseSetting("Dupli:Auth:EntraId:TenantId", TenantId);
+            builder.UseSetting("Dupli:Auth:EntraId:ClientId", "test-client");
+            builder.UseSetting("Dupli:Auth:EntraId:ClientSecret", "test-secret");
+            builder.UseSetting("Dupli:Auth:BootstrapOwnerEmail", BootstrapOwnerEmail);
+        }
         foreach (var (key, value) in _settings)
             builder.UseSetting(key, value);
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<TimeProvider>(Time);
             services.AddSingleton<INotificationChannel>(Notifications);
+            if (_authMode == "EntraId")
+            {
+                // No metadata download: the challenge only needs the authorization endpoint.
+                var configuration = new OpenIdConnectConfiguration
+                {
+                    AuthorizationEndpoint = "https://login.test/authorize",
+                    EndSessionEndpoint = "https://login.test/logout",
+                };
+                services.PostConfigure<OpenIdConnectOptions>(OperatorAuth.OidcScheme, o =>
+                {
+                    o.Configuration = configuration;
+                    o.ConfigurationManager = new StaticConfigurationManager<OpenIdConnectConfiguration>(configuration);
+                });
+                services.AddSingleton<IStartupFilter, FakeEntraSignIn>();
+            }
         });
+    }
+
+    /// <summary>Browser-like client: keeps cookies, does not follow redirects.</summary>
+    public HttpClient Browser() =>
+        CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
+
+    /// <summary>
+    /// Signs in as Entra ID would (EntraId mode): the claims go through the real <see cref="OperatorDirectory"/>.
+    /// Returns the browser, or throws with the access-denied redirect when the sign-in is refused.
+    /// </summary>
+    public async Task<HttpClient> SignInAsync(string email, string? oid = null, string? preferredUsername = null, string tenantId = TenantId)
+    {
+        var browser = Browser();
+        var response = await TrySignInAsync(browser, email, oid, preferredUsername, tenantId);
+        if (response.StatusCode != System.Net.HttpStatusCode.NoContent)
+            throw new HttpRequestException($"Sign-in refused: {(int)response.StatusCode} {response.Headers.Location}");
+        return browser;
+    }
+
+    public static Task<HttpResponseMessage> TrySignInAsync(
+        HttpClient browser, string? email, string? oid = null, string? preferredUsername = null, string tenantId = TenantId)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["tid"] = tenantId,
+            ["oid"] = oid ?? $"oid-{email}",
+            ["email"] = email,
+            ["preferred_username"] = preferredUsername,
+            ["name"] = email?.Split('@')[0],
+        };
+        return browser.GetAsync(Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(FakeEntraSignIn.Path, query));
     }
 
     public HttpClient Admin()
@@ -110,6 +172,38 @@ public sealed class DupliTestServer : WebApplicationFactory<Program>
         Npgsql.NpgsqlConnection.ClearPool(new Npgsql.NpgsqlConnection(_connectionString));
         try { Directory.Delete(_dataDir, recursive: true); } catch (IOException) { }
     }
+}
+
+/// <summary>
+/// Stands in for the Entra ID redirect round trip: <c>GET /test/entra-sign-in?tid=&amp;oid=&amp;email=...</c> hands the
+/// claims to <see cref="OperatorDirectory"/> exactly like the OIDC <c>OnTokenValidated</c> event does.
+/// Registered only by the test fixture.
+/// </summary>
+public sealed class FakeEntraSignIn : IStartupFilter
+{
+    public const string Path = "/test/entra-sign-in";
+
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Map(Path, branch => branch.Run(async http =>
+        {
+            var claims = new[] { "tid", "oid", "email", "preferred_username", "name" }
+                .Where(type => !string.IsNullOrEmpty(http.Request.Query[type]))
+                .Select(type => new Claim(type, http.Request.Query[type].ToString()));
+            var identity = OperatorIdentity.FromClaims(new ClaimsPrincipal(new ClaimsIdentity(claims, "fake-entra")));
+            var session = identity is null
+                ? null
+                : await http.RequestServices.GetRequiredService<OperatorDirectory>().SignInAsync(identity, http.RequestAborted);
+            if (session is null)
+            {
+                http.Response.Redirect(OperatorAuth.AccessDeniedUrl(identity?.Shown));
+                return;
+            }
+            await http.SignInAsync(OperatorAuth.CookieScheme, session);
+            http.Response.StatusCode = StatusCodes.Status204NoContent;
+        }));
+        next(app);
+    };
 }
 
 public sealed record EnrolledAgent(Guid AgentId, RegisterAgentResponse Registration, HttpClient Client);

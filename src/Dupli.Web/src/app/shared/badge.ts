@@ -28,6 +28,7 @@ const TONES: Record<string, Tone> = {
   'Update available': 'warn',
   'Update failed': 'bad',
   'No launcher': 'muted',
+  Invited: 'info',
 };
 
 const LABELS: Record<string, string> = {

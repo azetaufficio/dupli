@@ -8,29 +8,25 @@ using Dupli.Server.Background;
 using Dupli.Server.Domain.Jobs;
 using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Tests.Infrastructure;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Dupli.Server.Domain.Operators;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Dupli.Server.Tests;
 
 [Collection(ServerCollection.Name)]
 public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
 {
-    private readonly DupliTestServer _server = new(postgres, authMode: "Development");
+    private readonly DupliTestServer _server = new(postgres, authMode: "EntraId");
 
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => _server.DisposeAsync().AsTask();
 
-    /// <summary>Browser-like client: keeps cookies, does not follow redirects.</summary>
-    private HttpClient Browser() =>
-        _server.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = true });
+    private HttpClient Browser() => _server.Browser();
 
-    private static async Task<HttpClient> SignInAsync(HttpClient browser)
-    {
-        var login = await browser.GetAsync("/bff/login?returnUrl=/agents");
-        Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
-        Assert.Equal("/agents", login.Headers.Location?.OriginalString);
-        return browser;
-    }
+    private Task<HttpClient> SignInAsync() => _server.SignInAsync(DupliTestServer.BootstrapOwnerEmail);
 
     /// <summary>What Angular does: read the XSRF-TOKEN cookie issued by /bff/user and echo it in a header.</summary>
     private static async Task<string> XsrfTokenAsync(HttpClient browser)
@@ -48,18 +44,19 @@ public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
 
         var user = await (await Browser().GetAsync("/bff/user")).ReadAsync<UserInfoDto>();
         Assert.False(user.Authenticated);
-        Assert.Equal("Development", user.Mode);
+        Assert.Equal("EntraId", user.Mode);
     }
 
     [Fact]
     public async Task Session_cookie_grants_access_and_mutations_need_the_antiforgery_token()
     {
-        var browser = await SignInAsync(Browser());
+        var browser = await SignInAsync();
 
         var user = await (await browser.GetAsync("/bff/user")).ReadAsync<UserInfoDto>();
         Assert.True(user.Authenticated);
-        Assert.True(user.Authorized);
-        Assert.Equal("developer", user.Name);
+        Assert.Equal(OperatorRole.Owner, user.Role);
+        Assert.Equal("owner", user.Name);
+        Assert.Equal(DupliTestServer.BootstrapOwnerEmail, user.Email);
 
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/admin/agents")).StatusCode);
 
@@ -87,7 +84,7 @@ public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
     [Fact]
     public async Task Logout_requires_the_token_and_ends_the_session()
     {
-        var browser = await SignInAsync(Browser());
+        var browser = await SignInAsync();
         var token = await XsrfTokenAsync(browser);
 
         var forged = await browser.PostAsync("/bff/logout", new FormUrlEncodedContent([]));
@@ -100,10 +97,24 @@ public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Open_redirects_are_refused()
+    public async Task Login_challenges_entra_id_and_refuses_open_redirects()
     {
-        var login = await Browser().GetAsync("/bff/login?returnUrl=//evil.example.com/");
-        Assert.Equal("/", login.Headers.Location?.OriginalString);
+        Assert.Equal("/agents", await ChallengeRedirectUriAsync("/bff/login?returnUrl=/agents"));
+        Assert.Equal("/", await ChallengeRedirectUriAsync("/bff/login?returnUrl=//evil.example.com/"));
+
+        var reselect = await Browser().GetAsync("/bff/login?selectAccount=true");
+        Assert.Equal("select_account", QueryHelpers.ParseQuery(reselect.Headers.Location!.Query)["prompt"]);
+    }
+
+    /// <summary>Where the browser lands after Entra ID: the redirect URI carried in the (protected) OIDC state.</summary>
+    private async Task<string?> ChallengeRedirectUriAsync(string url)
+    {
+        var challenge = await Browser().GetAsync(url);
+        Assert.Equal(HttpStatusCode.Redirect, challenge.StatusCode);
+        Assert.StartsWith("https://login.test/authorize", challenge.Headers.Location!.AbsoluteUri);
+        var state = QueryHelpers.ParseQuery(challenge.Headers.Location.Query)["state"];
+        var oidc = _server.Services.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>().Get(OperatorAuth.OidcScheme);
+        return oidc.StateDataFormat.Unprotect(state)?.RedirectUri;
     }
 
     [Fact]
@@ -127,7 +138,7 @@ public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
         {
             Name = "docs",
             Cron = "0 2 * * *",
-            Sources = [new DirectorySourceDto { SourceId = "docs", Paths = ["/data"] }],
+            Sources = [new PolicyDirectorySourceDto { SourceId = "docs", Paths = ["/data"] }],
         })).ReadAsync<PolicyDto>();
         await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null);
         await online.Client.GetAsync($"/api/agents/{online.AgentId}/jobs");
@@ -162,7 +173,7 @@ public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
         {
             Name = "docs",
             Cron = "0 2 * * *",
-            Sources = [new DirectorySourceDto { SourceId = "docs", Paths = ["/data"] }],
+            Sources = [new PolicyDirectorySourceDto { SourceId = "docs", Paths = ["/data"] }],
         });
 
         var job = await (await admin.PostJsonAsync($"/api/admin/agents/{agent.AgentId}/jobs", new RunSystemJobRequest(JobType.RestoreTest))).ReadAsync<JobDto>();

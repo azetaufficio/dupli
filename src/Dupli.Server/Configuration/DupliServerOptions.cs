@@ -117,7 +117,10 @@ public sealed class AlertOptions
 /// <summary>Automation access to the admin API (scripts, CI). Operators use the web UI login instead.</summary>
 public sealed class AdminOptions
 {
-    /// <summary>Required value of the <c>X-Dupli-Admin-Key</c> header. Key access disabled when empty.</summary>
+    /// <summary>
+    /// Required value of the <c>X-Dupli-Admin-Key</c> header, also accepted by the <c>/admin</c> break-glass page.
+    /// Key access and <c>/admin</c> disabled when empty.
+    /// </summary>
     public string? ApiKey { get; set; }
 }
 
@@ -126,11 +129,8 @@ public enum AuthMode
     /// <summary>No interactive login: the web UI cannot be used, only the admin key.</summary>
     None,
 
-    /// <summary>Operators sign in with Microsoft Entra ID (OIDC, server-side BFF).</summary>
+    /// <summary>Operators sign in with Microsoft Entra ID (OIDC, server-side BFF), in every environment.</summary>
     EntraId,
-
-    /// <summary>Local development only: <c>/bff/login</c> signs in a fixed user without a password.</summary>
-    Development,
 }
 
 public sealed class AuthOptions
@@ -140,7 +140,12 @@ public sealed class AuthOptions
 
     /// <summary>Idle lifetime of the operator session cookie (sliding).</summary>
     public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(8);
-    public string DevelopmentUser { get; set; } = "developer";
+
+    /// <summary>
+    /// While no operator user exists, only this email (matched on the <c>email</c> or <c>preferred_username</c>
+    /// claim) may sign in, and becomes the first <c>Owner</c>. Required in EntraId mode until then.
+    /// </summary>
+    public string? BootstrapOwnerEmail { get; set; }
 }
 
 /// <summary>Where mirrored release sources may come from and where "import from GitHub" looks.</summary>
@@ -164,7 +169,4 @@ public sealed class EntraIdOptions
     public string? ClientSecret { get; set; }
     public string CallbackPath { get; set; } = "/signin-oidc";
     public string SignedOutCallbackPath { get; set; } = "/signout-callback-oidc";
-
-    /// <summary>When set, only users with this app role (the <c>roles</c> claim) may use the UI.</summary>
-    public string? RequiredRole { get; set; }
 }

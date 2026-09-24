@@ -28,7 +28,8 @@ export const httpErrorsInterceptor: HttpInterceptorFn = (req, next) => {
       if (
         error instanceof HttpErrorResponse &&
         error.status === 401 &&
-        !req.url.startsWith('/bff/')
+        !req.url.startsWith('/bff/') &&
+        !auth.standalone()
       ) {
         auth.login();
       } else if (!req.context.get(SILENT_ERRORS)) {

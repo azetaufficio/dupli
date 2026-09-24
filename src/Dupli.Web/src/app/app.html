@@ -1,6 +1,6 @@
 <header class="topbar">
   <a class="brand" routerLink="/">Dupli</a>
-  @if (auth.user()?.authorized) {
+  @if (auth.role() && !auth.standalone()) {
     <nav>
       <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
         >Dashboard</a
@@ -11,12 +11,17 @@
       <a routerLink="/alerts" routerLinkActive="active">Alerts</a>
       <a routerLink="/storage" routerLinkActive="active">Storage</a>
       <a routerLink="/releases" routerLinkActive="active">Releases</a>
+      @if (auth.isOwner()) {
+        <a routerLink="/users" routerLinkActive="active">Users</a>
+      }
     </nav>
   }
   <div class="user">
     @if (auth.user(); as user) {
       @if (user.authenticated) {
-        <span class="muted" [title]="user.email ?? ''">{{ user.name }}</span>
+        <span class="muted" [title]="(user.email ?? '') + ' · ' + (user.role ?? '')">{{
+          user.name
+        }}</span>
         <button type="button" class="btn small" (click)="auth.logout()">Sign out</button>
       }
     }
@@ -25,7 +30,9 @@
 
 <main class="content">
   @if (auth.user(); as user) {
-    @if (user.mode === 'None') {
+    @if (auth.standalone()) {
+      <router-outlet />
+    } @else if (user.mode === 'None') {
       <section class="card notice">
         <h1>Interactive login is not configured</h1>
         <p>
@@ -33,17 +40,6 @@
           the web UI. The admin API is still available with the
           <code>X-Dupli-Admin-Key</code> header.
         </p>
-      </section>
-    } @else if (!user.authorized) {
-      <section class="card notice">
-        <h1>Not authorized</h1>
-        <p>
-          You are signed in as <strong>{{ user.name }}</strong
-          >, but your account does not have the role required to use Dupli.
-        </p>
-        <button type="button" class="btn" (click)="auth.logout()">
-          Sign in with another account
-        </button>
       </section>
     } @else {
       <router-outlet />

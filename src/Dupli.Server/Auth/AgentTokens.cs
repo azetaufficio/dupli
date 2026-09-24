@@ -10,7 +10,22 @@ namespace Dupli.Server.Auth;
 public static class AuthConstants
 {
     public const string AgentPolicy = "Agent";
-    public const string AdminPolicy = "Admin";
+
+    /// <summary>Operator API, read-only: every signed-in operator (and the admin key).</summary>
+    public const string ViewerPolicy = "Viewer";
+
+    /// <summary>Operator API writes and snapshot contents: Operator or Owner.</summary>
+    public const string OperatorPolicy = "Operator";
+
+    /// <summary>Storage target writes and releases: Owner only.</summary>
+    public const string OwnerPolicy = "Owner";
+
+    /// <summary>Operator user management: Owner, or a break-glass session opened with the admin key.</summary>
+    public const string UsersPolicy = "Users";
+
+    /// <summary>Only a break-glass session (the <c>/admin</c> page).</summary>
+    public const string BreakGlassPolicy = "BreakGlass";
+
     public const string AdminScheme = "AdminKey";
     public const string AdminKeyHeader = "X-Dupli-Admin-Key";
     public const string Issuer = "dupli-server";

@@ -1,5 +1,7 @@
 using Cronos;
 using Dupli.Contracts.Policies;
+using Dupli.Server.Infrastructure.Database;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dupli.Server.Api;
 
@@ -39,16 +41,27 @@ public static class PolicyValidator
 
             switch (source)
             {
-                case DirectorySourceDto dir when dir.Paths.Count == 0 || dir.Paths.Any(string.IsNullOrWhiteSpace):
+                case PolicyDirectorySourceDto dir when dir.Paths.Count == 0 || dir.Paths.Any(string.IsNullOrWhiteSpace):
                     throw ApiException.BadRequest($"Source '{source.SourceId}' needs at least one non-empty path");
-                case PostgresSourceDto pg when string.IsNullOrWhiteSpace(pg.Username) || string.IsNullOrWhiteSpace(pg.PasswordSecret):
-                    throw ApiException.BadRequest($"Source '{source.SourceId}' needs username and passwordSecret");
-                case PostgresSourceDto pg when pg.Port is <= 0 or > 65535:
-                    throw ApiException.BadRequest($"Source '{source.SourceId}' has an invalid port");
-                case PostgresSourceDto { DatabaseSelection: DatabaseSelection.Only } pg
+                case PolicyPostgresSourceDto pg when pg.ConnectionId == Guid.Empty:
+                    throw ApiException.BadRequest($"Source '{source.SourceId}' needs a connection");
+                case PolicyPostgresSourceDto { DatabaseSelection: DatabaseSelection.Only } pg
                     when pg.IncludeDatabases.Count == 0 || pg.IncludeDatabases.Any(string.IsNullOrWhiteSpace):
                     throw ApiException.BadRequest($"Source '{source.SourceId}' selects only listed databases but the list is empty");
             }
         }
+    }
+
+    /// <summary>Every postgres source's connection must exist and belong to <paramref name="agentId"/>.</summary>
+    public static async Task ValidateConnectionsAsync(PolicyRequest request, Guid agentId, DupliDbContext db, CancellationToken ct)
+    {
+        var connectionIds = request.Sources.OfType<PolicyPostgresSourceDto>().Select(s => s.ConnectionId).Distinct().ToList();
+        if (connectionIds.Count == 0)
+            return;
+
+        var known = await db.PgConnections.Where(c => c.AgentId == agentId && connectionIds.Contains(c.Id)).Select(c => c.Id).ToListAsync(ct);
+        var missing = connectionIds.Except(known).ToList();
+        if (missing.Count > 0)
+            throw ApiException.BadRequest($"Unknown connection(s) for this agent: {string.Join(", ", missing)}");
     }
 }

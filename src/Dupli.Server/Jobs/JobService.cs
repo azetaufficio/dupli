@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Dupli.Contracts;
 using Dupli.Contracts.Jobs;
+using Dupli.Contracts.Policies;
 using Dupli.Server.Api;
 using Dupli.Server.Configuration;
 using Dupli.Server.Domain.Jobs;
@@ -22,9 +23,12 @@ public sealed class JobService(
     private JobOptions Jobs => options.Value.Jobs;
 
     /// <summary>Creates a Backup job for <paramref name="policy"/>, or returns null when one is already pending.</summary>
-    public Task<Job?> CreateBackupJobAsync(BackupPolicy policy, JobTrigger trigger, DateTimeOffset scheduledAt, CancellationToken ct) =>
-        CreateAsync(policy.AgentId, policy.Id, JobType.Backup, trigger, scheduledAt,
-            new BackupJobPayload { Policy = PolicySpecBuilder.Build(policy) }, ct);
+    public async Task<Job?> CreateBackupJobAsync(BackupPolicy policy, JobTrigger trigger, DateTimeOffset scheduledAt, CancellationToken ct)
+    {
+        var connections = await PolicySpecBuilder.LoadConnectionsAsync(db, policy.AgentId, ct);
+        return await CreateAsync(policy.AgentId, policy.Id, JobType.Backup, trigger, scheduledAt,
+            new BackupJobPayload { Policy = PolicySpecBuilder.Build(policy, connections) }, ct);
+    }
 
     public async Task<Job?> CreateSystemJobAsync(Guid agentId, JobType type, JobTrigger trigger, DateTimeOffset scheduledAt, CancellationToken ct)
     {
@@ -42,10 +46,7 @@ public sealed class JobService(
             },
             JobType.RestoreTest => new RestoreTestJobPayload
             {
-                Policies = (await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == agentId)
-                        .OrderBy(p => p.Name).ToListAsync(ct))
-                    .Select(PolicySpecBuilder.Build)
-                    .ToList(),
+                Policies = await BuildPolicySpecsAsync(agentId, ct),
                 SampleFiles = options.Value.Maintenance.RestoreTestSampleFiles,
             },
             JobType.RestartAgent => new RestartAgentJobPayload(),
@@ -60,6 +61,14 @@ public sealed class JobService(
     /// <summary>At most one pending restore per agent (system-job coalescing); null when one is already waiting.</summary>
     public Task<Job?> CreateRestoreJobAsync(Guid agentId, RestoreJobPayload payload, DateTimeOffset scheduledAt, CancellationToken ct) =>
         CreateAsync(agentId, null, JobType.Restore, JobTrigger.Manual, scheduledAt, payload, ct);
+
+    private async Task<IReadOnlyList<PolicySpecDto>> BuildPolicySpecsAsync(Guid agentId, CancellationToken ct)
+    {
+        var connections = await PolicySpecBuilder.LoadConnectionsAsync(db, agentId, ct);
+        return (await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == agentId).OrderBy(p => p.Name).ToListAsync(ct))
+            .Select(p => PolicySpecBuilder.Build(p, connections))
+            .ToList();
+    }
 
     private async Task<Job?> CreateAsync(
         Guid agentId, Guid? policyId, JobType type, JobTrigger trigger, DateTimeOffset scheduledAt,

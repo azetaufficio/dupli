@@ -45,9 +45,18 @@ cp deploy/.env.example deploy/.env      # host, Postgres password, Entra ID app 
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
 
-The image builds the web UI and the server; Caddy terminates TLS. Operator login is configured under `Dupli:Auth` (`EntraId`, or `Development` for local use only). The admin API also accepts an `X-Dupli-Admin-Key` header for automation when `Dupli:Admin:ApiKey` is set.
+The image builds the web UI and the server; Caddy terminates TLS. Operators sign in with Microsoft Entra ID (`Dupli:Auth`, in every environment). Who may sign in is the operator user table, managed from the **Users** page by an `Owner` (roles: `Owner`, `Operator`, `Viewer`). While the table is empty only `Dupli:Auth:BootstrapOwnerEmail` can sign in, and becomes the first owner; the server refuses to start in EntraId mode when neither exists. The admin API also accepts an `X-Dupli-Admin-Key` header for automation when `Dupli:Admin:ApiKey` is set; the same key opens the `/admin` break-glass page (15-minute session, user management only).
 
-Local development: run PostgreSQL, then `dotnet run --project src/Dupli.Server` (Development environment: automatic login) and `npm start` in `src/Dupli.Web` (dev server with a proxy to the API on port 5000).
+Local development: register a dev Entra ID app (platform Web, redirect URIs `http://localhost:4200/signin-oidc` and `http://localhost:5000/signin-oidc`) and store its settings in the server's user secrets:
+
+```
+dotnet user-secrets --project src/Dupli.Server set Dupli:Auth:EntraId:TenantId <tenant-id>
+dotnet user-secrets --project src/Dupli.Server set Dupli:Auth:EntraId:ClientId <client-id>
+dotnet user-secrets --project src/Dupli.Server set Dupli:Auth:EntraId:ClientSecret <secret>
+dotnet user-secrets --project src/Dupli.Server set Dupli:Auth:BootstrapOwnerEmail <you@yourdomain>
+```
+
+Then run PostgreSQL, `dotnet run --project src/Dupli.Server` and `npm start` in `src/Dupli.Web` (dev server with a proxy to the API on port 5000). Sign-in over plain HTTP works on `localhost` in Chrome/Edge/Firefox.
 
 ## Local test stack (Aspire)
 
@@ -57,12 +66,21 @@ Local development: run PostgreSQL, then `dotnet run --project src/Dupli.Server` 
 ASPIRE_ALLOW_UNSECURED_TRANSPORT=true dotnet run --project src/Dupli.AppHost --launch-profile http
 ```
 
+The server signs in with the same dev Entra ID app as above; set the AppHost parameters once (the dashboard asks for missing ones):
+
+```
+dotnet user-secrets --project src/Dupli.AppHost set Parameters:entra-tenant-id <tenant-id>
+dotnet user-secrets --project src/Dupli.AppHost set Parameters:entra-client-id <client-id>
+dotnet user-secrets --project src/Dupli.AppHost set Parameters:entra-client-secret <secret>
+dotnet user-secrets --project src/Dupli.AppHost set Parameters:bootstrap-owner-email <you@yourdomain>
+```
+
 | Resource | What it is |
 |---|---|
 | `postgres` | PostgreSQL: server database `dupli` + `sampledb` backed up by the agent |
 | `mailpit` | SMTP catcher for alert e-mails (web UI on its `http` endpoint) |
 | `rustfs` | S3-compatible storage for the restic repositories |
-| `server` | Management server on http://localhost:5000 (Development login, admin key `aspire-dev-admin-key`) |
+| `server` | Management server on http://localhost:5000 (Entra ID login with the parameters below, admin key `aspire-dev-admin-key`) |
 | `web` | Angular dev server on http://localhost:4200 |
 | `agent` | Linux container (`deploy/agent/Dockerfile`) running the agent |
 

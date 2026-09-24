@@ -3,6 +3,7 @@ import { Component, DestroyRef, computed, effect, inject, input, signal } from '
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService, params } from '../core/api.service';
+import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import {
   Agent,
@@ -12,6 +13,8 @@ import {
   EnrollmentToken,
   Job,
   LogEntry,
+  PgConnection,
+  PgConnectionRequest,
   Policy,
   Release,
   Run,
@@ -27,12 +30,40 @@ import { SnapshotBrowser } from '../shared/snapshot-browser';
 import { AlertsTable, ItemsTable, JobsTable, LogsTable, RunsTable, lookup } from '../shared/tables';
 
 type Tab =
-  'policies' | 'snapshots' | 'jobs' | 'history' | 'restore-tests' | 'logs' | 'alerts' | 'updates';
+  | 'policies'
+  | 'connections'
+  | 'snapshots'
+  | 'jobs'
+  | 'history'
+  | 'restore-tests'
+  | 'logs'
+  | 'alerts'
+  | 'updates';
 
 interface UpdateSettingsForm {
   channel: AgentChannel;
   pinnedAgentVersion: string;
   pinnedResticVersion: string;
+}
+
+interface ConnectionForm {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  passwordSecret: string;
+  binDirectory: string;
+}
+
+function emptyConnectionForm(): ConnectionForm {
+  return {
+    name: '',
+    host: 'localhost',
+    port: 5432,
+    username: 'postgres',
+    passwordSecret: '',
+    binDirectory: '',
+  };
 }
 
 const REFRESH_MS = 15_000;
@@ -91,28 +122,30 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
           </h1>
         </div>
         <div class="toolbar">
-          @if (a.status === 'Pending') {
-            <button type="button" class="btn primary" (click)="generateToken(a)">
-              Generate enrollment token
-            </button>
-          }
-          @if (a.status === 'Disabled') {
-            <button type="button" class="btn primary" (click)="enable(a)">Re-enable</button>
-          }
-          @if (a.status === 'Active') {
-            <button type="button" class="btn" (click)="runSystemJob(a, 'RestoreTest')">
-              Run restore test
-            </button>
-            <button type="button" class="btn" (click)="runSystemJob(a, 'RepositoryCheck')">
-              Check repository
-            </button>
-            <button type="button" class="btn" (click)="runSystemJob(a, 'Retention')">
-              Run retention
-            </button>
-            <button type="button" class="btn" (click)="runSystemJob(a, 'RestartAgent')">
-              Restart agent
-            </button>
-            <button type="button" class="btn danger" (click)="disable(a)">Disable</button>
+          @if (auth.canOperate()) {
+            @if (a.status === 'Pending') {
+              <button type="button" class="btn primary" (click)="generateToken(a)">
+                Generate enrollment token
+              </button>
+            }
+            @if (a.status === 'Disabled') {
+              <button type="button" class="btn primary" (click)="enable(a)">Re-enable</button>
+            }
+            @if (a.status === 'Active') {
+              <button type="button" class="btn" (click)="runSystemJob(a, 'RestoreTest')">
+                Run restore test
+              </button>
+              <button type="button" class="btn" (click)="runSystemJob(a, 'RepositoryCheck')">
+                Check repository
+              </button>
+              <button type="button" class="btn" (click)="runSystemJob(a, 'Retention')">
+                Run retention
+              </button>
+              <button type="button" class="btn" (click)="runSystemJob(a, 'RestartAgent')">
+                Restart agent
+              </button>
+              <button type="button" class="btn danger" (click)="disable(a)">Disable</button>
+            }
           }
         </div>
       </div>
@@ -186,6 +219,13 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         <button type="button" [class.active]="tab() === 'policies'" (click)="tab.set('policies')">
           Policies<span class="count">{{ policies.value()?.length ?? 0 }}</span>
         </button>
+        <button
+          type="button"
+          [class.active]="tab() === 'connections'"
+          (click)="tab.set('connections')"
+        >
+          Connections<span class="count">{{ connections.value()?.length ?? 0 }}</span>
+        </button>
         <button type="button" [class.active]="tab() === 'snapshots'" (click)="tab.set('snapshots')">
           Snapshots
         </button>
@@ -218,9 +258,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
           <section class="card flush">
             <div class="card-header">
               <h2>Backup policies</h2>
-              <a class="btn primary small" [routerLink]="['/agents', a.id, 'policies', 'new']"
-                >New policy</a
-              >
+              @if (auth.canOperate()) {
+                <a class="btn primary small" [routerLink]="['/agents', a.id, 'policies', 'new']"
+                  >New policy</a
+                >
+              }
             </div>
             @if ((policies.value() ?? []).length === 0) {
               <div class="empty">No policies. Nothing is backed up for this agent yet.</div>
@@ -253,7 +295,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                               {{
                                 s.type === 'directory'
                                   ? s.paths.join(', ')
-                                  : s.username + '@' + s.host + ':' + s.port
+                                  : (connectionNames()[s.connectionId] ?? 'unknown connection')
                               }}
                             </div>
                           }
@@ -273,14 +315,130 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                           />
                         </td>
                         <td class="num">
-                          <button
-                            type="button"
-                            class="btn small"
-                            [disabled]="a.status !== 'Active'"
-                            (click)="runPolicy(p)"
-                          >
-                            Run now
-                          </button>
+                          @if (auth.canOperate()) {
+                            <button
+                              type="button"
+                              class="btn small"
+                              [disabled]="a.status !== 'Active'"
+                              (click)="runPolicy(p)"
+                            >
+                              Run now
+                            </button>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </section>
+        }
+        @case ('connections') {
+          @if (auth.canOperate()) {
+            <section class="card form">
+              <h2>{{ editingConnectionId() ? 'Edit connection' : 'New connection' }}</h2>
+              <form (ngSubmit)="saveConnection(a.id)" #connForm="ngForm">
+                <div class="form-row">
+                  <label class="field"
+                    >Name <input name="connName" [(ngModel)]="connectionForm.name" required
+                  /></label>
+                  <label class="field"
+                    >Host <input name="connHost" [(ngModel)]="connectionForm.host" required
+                  /></label>
+                  <label class="field"
+                    >Port
+                    <input type="number" name="connPort" [(ngModel)]="connectionForm.port" required
+                  /></label>
+                </div>
+                <div class="form-row">
+                  <label class="field"
+                    >Username <input name="connUser" [(ngModel)]="connectionForm.username" required
+                  /></label>
+                  <label class="field">
+                    Password secret name
+                    <input name="connSecret" [(ngModel)]="connectionForm.passwordSecret" required />
+                    <span class="hint"
+                      >Not the password: the name of the secret stored on the VM with
+                      <code
+                        >dupli-agent secret set
+                        {{ connectionForm.passwordSecret || '&lt;name&gt;' }}</code
+                      >.</span
+                    >
+                  </label>
+                  <label class="field">
+                    pg_dump directory
+                    <span class="hint">Optional. Auto-detected from the registry when empty.</span>
+                    <input
+                      name="connBin"
+                      [(ngModel)]="connectionForm.binDirectory"
+                      placeholder="C:\\Program Files\\PostgreSQL\\18\\bin"
+                    />
+                  </label>
+                </div>
+                @if (connectionError()) {
+                  <div class="error-box">{{ connectionError() }}</div>
+                }
+                <div class="toolbar">
+                  <button
+                    type="submit"
+                    class="btn primary"
+                    [disabled]="connForm.invalid || savingConnection()"
+                  >
+                    {{ editingConnectionId() ? 'Save changes' : 'Add connection' }}
+                  </button>
+                  @if (editingConnectionId()) {
+                    <button type="button" class="btn" (click)="cancelEditConnection()">
+                      Cancel
+                    </button>
+                  }
+                </div>
+              </form>
+            </section>
+          }
+
+          <section class="card flush">
+            <div class="card-header"><h2>Connections</h2></div>
+            @if ((connections.value() ?? []).length === 0) {
+              <div class="empty">
+                No PostgreSQL connections. Add one, then reference it from a policy source.
+              </div>
+            } @else {
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Host</th>
+                      <th>Port</th>
+                      <th>Username</th>
+                      <th>Password secret</th>
+                      <th>pg_dump dir</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (c of connections.value() ?? []; track c.id) {
+                      <tr>
+                        <td>{{ c.name }}</td>
+                        <td class="mono">{{ c.host }}</td>
+                        <td class="mono">{{ c.port }}</td>
+                        <td class="mono">{{ c.username }}</td>
+                        <td class="mono">{{ c.passwordSecret }}</td>
+                        <td class="mono">{{ c.binDirectory ?? '—' }}</td>
+                        <td class="num">
+                          @if (auth.canOperate()) {
+                            <button type="button" class="btn small" (click)="editConnection(c)">
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              class="btn small danger"
+                              (click)="deleteConnection(c)"
+                            >
+                              Delete
+                            </button>
+                          }
                         </td>
                       </tr>
                     }
@@ -438,44 +596,46 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
             </dl>
           </section>
 
-          <section class="card form">
-            <h2>Update settings</h2>
-            <form (ngSubmit)="saveSettings(a)">
-              <div class="form-row">
-                <label class="field">
-                  Channel
-                  <select name="channel" [(ngModel)]="settings.channel">
-                    @for (c of channels; track c) {
-                      <option [value]="c">{{ c }}</option>
-                    }
-                  </select>
-                </label>
-                <label class="field">
-                  Pinned agent version
-                  <select name="pinnedAgentVersion" [(ngModel)]="settings.pinnedAgentVersion">
-                    <option value="">none (follow channel)</option>
-                    @for (r of agentReleasesForPlatform(); track r.id) {
-                      <option [value]="r.version">{{ r.version }} ({{ r.channel }})</option>
-                    }
-                  </select>
-                </label>
-                <label class="field">
-                  Pinned restic version
-                  <select name="pinnedResticVersion" [(ngModel)]="settings.pinnedResticVersion">
-                    <option value="">none (follow channel)</option>
-                    @for (r of resticReleasesForPlatform(); track r.id) {
-                      <option [value]="r.version">{{ r.version }}</option>
-                    }
-                  </select>
-                </label>
-              </div>
-              <div class="toolbar">
-                <button type="submit" class="btn primary" [disabled]="savingSettings()">
-                  Save
-                </button>
-              </div>
-            </form>
-          </section>
+          @if (auth.canOperate()) {
+            <section class="card form">
+              <h2>Update settings</h2>
+              <form (ngSubmit)="saveSettings(a)">
+                <div class="form-row">
+                  <label class="field">
+                    Channel
+                    <select name="channel" [(ngModel)]="settings.channel">
+                      @for (c of channels; track c) {
+                        <option [value]="c">{{ c }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="field">
+                    Pinned agent version
+                    <select name="pinnedAgentVersion" [(ngModel)]="settings.pinnedAgentVersion">
+                      <option value="">none (follow channel)</option>
+                      @for (r of agentReleasesForPlatform(); track r.id) {
+                        <option [value]="r.version">{{ r.version }} ({{ r.channel }})</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="field">
+                    Pinned restic version
+                    <select name="pinnedResticVersion" [(ngModel)]="settings.pinnedResticVersion">
+                      <option value="">none (follow channel)</option>
+                      @for (r of resticReleasesForPlatform(); track r.id) {
+                        <option [value]="r.version">{{ r.version }}</option>
+                      }
+                    </select>
+                  </label>
+                </div>
+                <div class="toolbar">
+                  <button type="submit" class="btn primary" [disabled]="savingSettings()">
+                    Save
+                  </button>
+                </div>
+              </form>
+            </section>
+          }
         }
       }
     } @else if (agent.isLoading()) {
@@ -488,6 +648,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
 export class AgentDetailPage {
   readonly id = input.required<string>();
 
+  protected readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
@@ -503,6 +664,10 @@ export class AgentDetailPage {
   );
   protected readonly policies = httpResource<Policy[]>(
     () => `/api/admin/agents/${this.id()}/policies`,
+  );
+  // Not gated on the 'connections' tab: also needed for the policies tab's Sources column and its tab badge.
+  protected readonly connections = httpResource<PgConnection[]>(
+    () => `/api/admin/agents/${this.id()}/connections`,
   );
   protected readonly jobs = httpResource<Job[]>(() =>
     this.tab() === 'jobs'
@@ -543,6 +708,7 @@ export class AgentDetailPage {
   );
 
   protected readonly policyNames = computed(() => lookup(this.policies.value()));
+  protected readonly connectionNames = computed(() => lookup(this.connections.value()));
   protected readonly openAlertCount = computed(
     () => (this.alerts.value() ?? []).filter((a) => !a.resolvedAt).length,
   );
@@ -568,6 +734,11 @@ export class AgentDetailPage {
   };
   protected readonly savingSettings = signal(false);
   private readonly settingsReady = signal(false);
+
+  protected connectionForm: ConnectionForm = emptyConnectionForm();
+  protected readonly editingConnectionId = signal<string | null>(null);
+  protected readonly savingConnection = signal(false);
+  protected readonly connectionError = signal<string | null>(null);
 
   constructor() {
     const timer = setInterval(() => this.refresh(), REFRESH_MS);
@@ -601,6 +772,10 @@ export class AgentDetailPage {
         break;
       case 'policies':
         this.policies.reload();
+        this.connections.reload();
+        break;
+      case 'connections':
+        this.connections.reload();
         break;
       case 'updates':
         this.agentReleases.reload();
@@ -717,5 +892,68 @@ export class AgentDetailPage {
           this.savingSettings.set(false);
         },
       });
+  }
+
+  protected editConnection(c: PgConnection): void {
+    this.editingConnectionId.set(c.id);
+    this.connectionError.set(null);
+    this.connectionForm = {
+      name: c.name,
+      host: c.host,
+      port: c.port,
+      username: c.username,
+      passwordSecret: c.passwordSecret,
+      binDirectory: c.binDirectory ?? '',
+    };
+  }
+
+  protected cancelEditConnection(): void {
+    this.editingConnectionId.set(null);
+    this.connectionError.set(null);
+    this.connectionForm = emptyConnectionForm();
+  }
+
+  protected saveConnection(agentId: string): void {
+    const request: PgConnectionRequest = {
+      name: this.connectionForm.name.trim(),
+      host: this.connectionForm.host.trim(),
+      port: Number(this.connectionForm.port),
+      username: this.connectionForm.username.trim(),
+      passwordSecret: this.connectionForm.passwordSecret.trim(),
+      binDirectory: this.connectionForm.binDirectory.trim() || null,
+    };
+    const context = new HttpContext().set(SILENT_ERRORS, true);
+    const id = this.editingConnectionId();
+    const call = id
+      ? this.api.updateConnection(id, request, context)
+      : this.api.createConnection(agentId, request, context);
+
+    this.savingConnection.set(true);
+    this.connectionError.set(null);
+    call.subscribe({
+      next: (connection) => {
+        this.toasts.success(`Connection "${connection.name}" saved`);
+        this.savingConnection.set(false);
+        this.cancelEditConnection();
+        this.connections.reload();
+      },
+      error: (e) => {
+        this.connectionError.set(problemMessage(e));
+        this.savingConnection.set(false);
+      },
+    });
+  }
+
+  protected async deleteConnection(c: PgConnection): Promise<void> {
+    const ok = await this.confirm.ask(
+      `Delete connection "${c.name}"?`,
+      'Fails if a policy source still uses it for PostgreSQL backups.',
+      { confirmLabel: 'Delete', danger: true },
+    );
+    if (!ok) return;
+    this.api.deleteConnection(c.id).subscribe(() => {
+      this.toasts.success('Connection deleted');
+      this.connections.reload();
+    });
   }
 }

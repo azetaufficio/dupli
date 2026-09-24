@@ -25,11 +25,14 @@ public sealed class AdminApiKeyHandler(
         if (string.IsNullOrEmpty(expected) || !Request.Headers.TryGetValue(AuthConstants.AdminKeyHeader, out var provided))
             return Task.FromResult(AuthenticateResult.NoResult());
 
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided.ToString()), Encoding.UTF8.GetBytes(expected)))
+        if (!Matches(provided.ToString(), expected))
             return Task.FromResult(AuthenticateResult.Fail("Invalid admin key"));
 
         var identity = new ClaimsIdentity(
             [new Claim(ClaimTypes.Name, "admin-key"), new Claim(OperatorAuth.ApiKeyClaim, "true")], AuthConstants.AdminScheme);
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), AuthConstants.AdminScheme)));
     }
+
+    public static bool Matches(string provided, string expected) =>
+        CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(expected));
 }

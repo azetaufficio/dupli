@@ -21,7 +21,7 @@ public sealed class SchedulingTests(PostgresFixture postgres) : IAsyncLifetime
         {
             Name = "hourly",
             Cron = "0 * * * *",
-            Sources = [new DirectorySourceDto { SourceId = "docs", Paths = ["/data"] }],
+            Sources = [new PolicyDirectorySourceDto { SourceId = "docs", Paths = ["/data"] }],
         })).ReadAsync<PolicyDto>();
 
     private async Task<List<JobDto>> JobsAsync(Guid agentId, JobType? type = null) =>

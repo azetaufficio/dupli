@@ -1,4 +1,6 @@
+import { inject } from '@angular/core';
 import { Routes } from '@angular/router';
+import { AuthService } from './core/auth.service';
 
 export const routes: Routes = [
   {
@@ -50,6 +52,22 @@ export const routes: Routes = [
     path: 'releases',
     title: 'Releases · Dupli',
     loadComponent: () => import('./pages/releases').then((m) => m.ReleasesPage),
+  },
+  {
+    path: 'users',
+    title: 'Users · Dupli',
+    canMatch: [() => inject(AuthService).isOwner()],
+    loadComponent: () => import('./pages/users').then((m) => m.UsersPage),
+  },
+  {
+    path: 'admin',
+    title: 'Break-glass · Dupli',
+    loadComponent: () => import('./pages/admin').then((m) => m.AdminPage),
+  },
+  {
+    path: 'access-denied',
+    title: 'Access denied · Dupli',
+    loadComponent: () => import('./pages/access-denied').then((m) => m.AccessDeniedPage),
   },
   { path: '**', redirectTo: '' },
 ];

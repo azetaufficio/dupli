@@ -110,7 +110,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var policy = await Read<PolicyDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agent.Id}/policies", new PolicyRequest
         {
             Name = "nightly", Cron = "0 2 * * *",
-            Sources = [new DirectorySourceDto { SourceId = "data", Paths = [data] }],
+            Sources = [new PolicyDirectorySourceDto { SourceId = "data", Paths = [data] }],
         }, DupliJson.Options));
 
         // Agent: enrollment stores every secret in the secret store, none in agent.json.
@@ -254,7 +254,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var policy = await Read<PolicyDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/policies", new PolicyRequest
         {
             Name = "files", Cron = "0 2 * * *",
-            Sources = [new DirectorySourceDto { SourceId = "data", Paths = [data] }],
+            Sources = [new PolicyDirectorySourceDto { SourceId = "data", Paths = [data] }],
         }, DupliJson.Options));
         var (loop, _, _) = CreateAgent(paths, config, secrets);
         await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));

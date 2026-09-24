@@ -3,7 +3,9 @@ using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Postgres;
 using Dupli.Contracts.Jobs;
 using Dupli.Contracts.Policies;
+using Dupli.Server.Auth;
 using Dupli.Server.Domain.Agents;
+using Dupli.Server.Domain.Policies;
 using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Jobs;
 using Dupli.Server.Restore;
@@ -20,17 +22,24 @@ public static partial class RestoreApi
     public static void MapRestoreApi(this RouteGroupBuilder admin)
     {
         admin.MapGet("/agents/{id:guid}/snapshots", ListSnapshotsAsync);
-        admin.MapGet("/agents/{id:guid}/snapshots/{snapshotId}/tree", ListTreeAsync);
-        admin.MapPost("/agents/{id:guid}/restores", CreateRestoreAsync);
+        // Snapshot contents (file names) and restores need the Operator role; the snapshot list is readable by Viewers.
+        admin.MapGet("/agents/{id:guid}/snapshots/{snapshotId}/tree", ListTreeAsync).RequireAuthorization(AuthConstants.OperatorPolicy);
+        admin.MapPost("/agents/{id:guid}/restores", CreateRestoreAsync).RequireAuthorization(AuthConstants.OperatorPolicy);
     }
 
     private static async Task<IEnumerable<SnapshotDto>> ListSnapshotsAsync(
         Guid id, RepositoryBrowser browser, DupliDbContext db, CancellationToken ct, bool refresh = false)
     {
         var snapshots = await browser.ListSnapshotsAsync(id, refresh, ct);
-        var policyNames = await db.Policies.AsNoTracking().Where(p => p.AgentId == id)
-            .ToDictionaryAsync(p => p.Id, p => p.Name, ct);
-        return snapshots.Select(s => ToDto(s, policyNames));
+        var policies = await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == id).ToListAsync(ct);
+        var policyNames = policies.ToDictionary(p => p.Id, p => p.Name);
+        var connectionsBySource = policies
+            .SelectMany(p => p.Sources
+                .Where(s => s.Type == BackupSourceType.PostgreSql)
+                .Select(s => (Key: (PolicyId: p.Id, SourceId: s.SourceKey), Source: PolicySpecBuilder.ToDto(s) as PolicyPostgresSourceDto)))
+            .Where(x => x.Source is not null)
+            .ToDictionary(x => x.Key, x => x.Source!.ConnectionId);
+        return snapshots.Select(s => ToDto(s, policyNames, connectionsBySource));
     }
 
     private static async Task<IEnumerable<SnapshotNodeDto>> ListTreeAsync(
@@ -52,16 +61,28 @@ public static partial class RestoreApi
         // The VM is usually Windows while the server is Linux: check the shape, the agent resolves and guards it.
         if (!string.IsNullOrWhiteSpace(request.TargetDirectory) && !AbsolutePathRegex().IsMatch(request.TargetDirectory.Trim()))
             throw ApiException.BadRequest("Target directory must be an absolute path on the VM (e.g. D:\\Restore\\x)");
+        if (!string.IsNullOrWhiteSpace(request.NewDatabase) && request.ConnectionId is null)
+            throw ApiException.BadRequest("A target connection is required to load into a new database");
 
         var agent = await db.Agents.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct) ?? throw ApiException.NotFound("Agent");
         if (agent.Status != AgentStatus.Active)
             throw ApiException.Conflict("The agent is not active: a restore runs on the VM");
 
+        PgConnection? connection = null;
+        if (request.ConnectionId is { } connectionId)
+        {
+            connection = await db.PgConnections.AsNoTracking().SingleOrDefaultAsync(c => c.Id == connectionId, ct)
+                ?? throw ApiException.BadRequest("Unknown connection");
+            if (connection.AgentId != id)
+                throw ApiException.BadRequest("The connection does not belong to this agent");
+        }
+
         var snapshot = await browser.FindSnapshotAsync(id, request.SnapshotId, ct)
             ?? throw ApiException.NotFound($"Snapshot {request.SnapshotId}");
 
+        var connections = await PolicySpecBuilder.LoadConnectionsAsync(db, id, ct);
         var policies = (await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == id).ToListAsync(ct))
-            .Select(PolicySpecBuilder.Build)
+            .Select(p => PolicySpecBuilder.Build(p, connections))
             .ToList();
 
         var payload = new RestoreJobPayload
@@ -69,7 +90,7 @@ public static partial class RestoreApi
             SnapshotId = snapshot.Id,
             Includes = request.Includes,
             TargetDirectory = string.IsNullOrWhiteSpace(request.TargetDirectory) ? null : request.TargetDirectory.Trim(),
-            Postgres = string.IsNullOrWhiteSpace(request.NewDatabase) ? null : PostgresRestore(snapshot, request.NewDatabase.Trim(), policies),
+            Postgres = string.IsNullOrWhiteSpace(request.NewDatabase) ? null : PostgresRestore(snapshot, request.NewDatabase.Trim(), connection!),
             Policies = policies,
         };
 
@@ -78,7 +99,7 @@ public static partial class RestoreApi
         return Results.Accepted($"/api/admin/jobs/{job.Id}", AdminApi.ToDto(job));
     }
 
-    private static PostgresRestoreDto PostgresRestore(SnapshotInfo snapshot, string newDatabase, IReadOnlyList<PolicySpecDto> policies)
+    private static PostgresRestoreDto PostgresRestore(SnapshotInfo snapshot, string newDatabase, PgConnection connection)
     {
         var tags = ParseTags(snapshot.Tags);
         if (tags.GetValueOrDefault("type") != "pg" || tags.GetValueOrDefault("db") is not { } database)
@@ -90,27 +111,37 @@ public static partial class RestoreApi
         if (string.Equals(newDatabase, database, StringComparison.OrdinalIgnoreCase))
             throw ApiException.BadRequest("The new database must have a different name from the backed-up one");
 
-        var source = policies
-            .Where(p => p.PolicyId == tags.GetValueOrDefault("policy"))
-            .SelectMany(p => p.Sources)
-            .OfType<PostgresSourceDto>()
-            .FirstOrDefault(s => s.SourceId == tags.GetValueOrDefault("source"))
-            ?? throw ApiException.BadRequest("The policy source of this snapshot no longer exists: restore the dump file instead");
+        var sourceId = tags.GetValueOrDefault("source") ?? throw ApiException.BadRequest("Snapshot is missing its source tag");
+        var source = new PostgresSourceDto
+        {
+            SourceId = sourceId,
+            Host = connection.Host,
+            Port = connection.Port,
+            Username = connection.Username,
+            PasswordSecret = connection.PasswordSecret,
+            BinDirectory = connection.BinDirectory,
+        };
 
         return new PostgresRestoreDto { Source = source, Database = database, NewDatabase = newDatabase };
     }
 
-    private static SnapshotDto ToDto(SnapshotInfo s, IReadOnlyDictionary<Guid, string> policyNames)
+    private static SnapshotDto ToDto(
+        SnapshotInfo s, IReadOnlyDictionary<Guid, string> policyNames, IReadOnlyDictionary<(Guid PolicyId, string SourceId), Guid> connectionsBySource)
     {
         var tags = ParseTags(s.Tags);
         Guid? policyId = Guid.TryParse(tags.GetValueOrDefault("policy"), out var pid) ? pid : null;
+        var sourceId = tags.GetValueOrDefault("source");
+        Guid? connectionId = policyId is { } p && sourceId is not null && connectionsBySource.TryGetValue((p, sourceId), out var cid)
+            ? cid
+            : null;
         return new SnapshotDto(
             s.Id, s.ShortId, s.Time, s.Host, s.Paths, s.Tags,
             policyId,
-            policyId is { } p ? policyNames.GetValueOrDefault(p) : null,
-            tags.GetValueOrDefault("source"),
+            policyId is { } pp ? policyNames.GetValueOrDefault(pp) : null,
+            sourceId,
             tags.GetValueOrDefault("type"),
-            tags.GetValueOrDefault("db"));
+            tags.GetValueOrDefault("db"),
+            connectionId);
     }
 
     /// <summary><c>key=value</c> tags written by the agent (<c>BackupTags</c>); first value wins.</summary>

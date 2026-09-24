@@ -13,10 +13,15 @@ import {
   Dashboard,
   EnrollmentToken,
   ImportAgentReleaseRequest,
+  InviteOperatorRequest,
   Job,
   JobState,
   JobType,
   LogEntry,
+  OperatorRole,
+  OperatorUser,
+  PgConnection,
+  PgConnectionRequest,
   Policy,
   PolicyRequest,
   Release,
@@ -217,5 +222,54 @@ export class ApiService {
 
   makeReleaseCurrent(id: string): Observable<void> {
     return this.http.post<void>(`${this.base}/releases/${id}/make-current`, null);
+  }
+
+  connections(agentId: string): Observable<PgConnection[]> {
+    return this.http.get<PgConnection[]>(`${this.base}/agents/${agentId}/connections`);
+  }
+
+  createConnection(
+    agentId: string,
+    request: PgConnectionRequest,
+    context?: HttpContext,
+  ): Observable<PgConnection> {
+    return this.http.post<PgConnection>(`${this.base}/agents/${agentId}/connections`, request, {
+      context,
+    });
+  }
+
+  updateConnection(
+    id: string,
+    request: PgConnectionRequest,
+    context?: HttpContext,
+  ): Observable<PgConnection> {
+    return this.http.put<PgConnection>(`${this.base}/connections/${id}`, request, { context });
+  }
+
+  deleteConnection(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.base}/connections/${id}`);
+  }
+
+  users(): Observable<OperatorUser[]> {
+    return this.http.get<OperatorUser[]>(`${this.base}/users`);
+  }
+
+  inviteUser(request: InviteOperatorRequest, context?: HttpContext): Observable<OperatorUser> {
+    return this.http.post<OperatorUser>(`${this.base}/users`, request, { context });
+  }
+
+  setUserRole(id: string, role: OperatorRole): Observable<OperatorUser> {
+    return this.http.put<OperatorUser>(`${this.base}/users/${id}`, { role });
+  }
+
+  setUserDisabled(id: string, disabled: boolean): Observable<OperatorUser> {
+    return this.http.post<OperatorUser>(
+      `${this.base}/users/${id}/${disabled ? 'disable' : 'enable'}`,
+      null,
+    );
+  }
+
+  deleteUser(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.base}/users/${id}`);
   }
 }

@@ -5,12 +5,14 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { catchError, debounceTime, distinctUntilChanged, of, switchMap } from 'rxjs';
 import { ApiService } from '../core/api.service';
+import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import {
   Agent,
   BackupSource,
   CronPreview,
   DatabaseSelection,
+  PgConnection,
   Policy,
   PolicyRequest,
   StorageTarget,
@@ -24,15 +26,11 @@ interface SourceForm {
   sourceId: string;
   paths: string;
   excludes: string;
-  host: string;
-  port: number;
-  username: string;
-  passwordSecret: string;
+  connectionId: string;
   databaseSelection: DatabaseSelection;
   excludeDatabases: string;
   includeDatabases: string;
   includeGlobals: boolean;
-  binDirectory: string;
 }
 
 const lines = (text: string): string[] =>
@@ -41,21 +39,17 @@ const lines = (text: string): string[] =>
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-function newSource(type: SourceForm['type'], index: number): SourceForm {
+function newSource(type: SourceForm['type'], index: number, connectionId = ''): SourceForm {
   return {
     type,
     sourceId: type === 'directory' ? `files${index}` : `pg${index}`,
     paths: '',
     excludes: '',
-    host: 'localhost',
-    port: 5432,
-    username: 'postgres',
-    passwordSecret: 'pg-main',
+    connectionId,
     databaseSelection: 'AllExcept',
     excludeDatabases: '',
     includeDatabases: '',
     includeGlobals: true,
-    binDirectory: '',
   };
 }
 
@@ -71,15 +65,11 @@ function toForm(source: BackupSource): SourceForm {
     : {
         ...base,
         sourceId: source.sourceId,
-        host: source.host,
-        port: source.port,
-        username: source.username,
-        passwordSecret: source.passwordSecret,
+        connectionId: source.connectionId,
         databaseSelection: source.databaseSelection ?? 'AllExcept',
         excludeDatabases: source.excludeDatabases.join('\n'),
         includeDatabases: (source.includeDatabases ?? []).join('\n'),
         includeGlobals: source.includeGlobals,
-        binDirectory: source.binDirectory ?? '',
       };
 }
 
@@ -95,15 +85,11 @@ function toDto(s: SourceForm): BackupSource {
     : {
         type: 'postgres',
         sourceId: s.sourceId.trim(),
-        host: s.host.trim(),
-        port: Number(s.port),
-        username: s.username.trim(),
-        passwordSecret: s.passwordSecret.trim(),
+        connectionId: s.connectionId,
         databaseSelection: s.databaseSelection,
         excludeDatabases: s.databaseSelection === 'AllExcept' ? lines(s.excludeDatabases) : [],
         includeDatabases: s.databaseSelection === 'Only' ? lines(s.includeDatabases) : [],
         includeGlobals: s.includeGlobals,
-        binDirectory: s.binDirectory.trim() || null,
       };
 }
 
@@ -126,7 +112,7 @@ function supportedTimeZones(): string[] {
         </p>
         <h1>{{ id() ? 'Edit policy' : 'New policy' }}</h1>
       </div>
-      @if (id()) {
+      @if (id() && auth.canOperate()) {
         <div class="toolbar">
           <button type="button" class="btn danger" (click)="remove()">Delete policy</button>
         </div>
@@ -262,26 +248,27 @@ function supportedTimeZones(): string[] {
                     </label>
                   </div>
                 } @else {
-                  <div class="form-row">
-                    <label class="field"
-                      >Host <input [name]="'host' + i" [(ngModel)]="s.host" required
-                    /></label>
-                    <label class="field"
-                      >Port <input type="number" [name]="'port' + i" [(ngModel)]="s.port" required
-                    /></label>
-                    <label class="field"
-                      >Username <input [name]="'user' + i" [(ngModel)]="s.username" required
-                    /></label>
+                  @if (connections().length === 0) {
+                    <div class="hint">
+                      This agent has no PostgreSQL connections yet. Add one in its
+                      <a [routerLink]="['/agents', agentIdResolved()]">Connections tab</a>, then
+                      come back.
+                    </div>
+                  } @else {
                     <label class="field">
-                      Password secret name
-                      <input [name]="'pw' + i" [(ngModel)]="s.passwordSecret" required />
+                      Connection
+                      <select [name]="'conn' + i" [(ngModel)]="s.connectionId" required>
+                        <option value="" disabled>Select a connection…</option>
+                        @for (c of connections(); track c.id) {
+                          <option [value]="c.id">{{ c.name }}</option>
+                        }
+                      </select>
                       <span class="hint"
-                        >Not the password: the name of the secret stored on the VM with
-                        <code>dupli-agent secret set {{ s.passwordSecret || '&lt;name&gt;' }}</code
-                        >.</span
+                        >Host, port, username and password secret come from the agent's
+                        <a [routerLink]="['/agents', agentIdResolved()]">Connections</a>.</span
                       >
                     </label>
-                  </div>
+                  }
                   <div class="form-row">
                     <div class="field">
                       Databases
@@ -326,17 +313,6 @@ function supportedTimeZones(): string[] {
                         ></textarea>
                       }
                     </div>
-                    <label class="field">
-                      pg_dump directory
-                      <span class="hint"
-                        >Optional. Auto-detected from the registry when empty.</span
-                      >
-                      <input
-                        [name]="'bin' + i"
-                        [(ngModel)]="s.binDirectory"
-                        placeholder="C:\\Program Files\\PostgreSQL\\18\\bin"
-                      />
-                    </label>
                   </div>
                   <label class="check">
                     <input type="checkbox" [name]="'glob' + i" [(ngModel)]="s.includeGlobals" />
@@ -352,13 +328,15 @@ function supportedTimeZones(): string[] {
           <div class="error-box">{{ error() }}</div>
         }
         <div class="toolbar">
-          <button
-            type="submit"
-            class="btn primary"
-            [disabled]="f.invalid || sources().length === 0 || saving()"
-          >
-            {{ id() ? 'Save changes' : 'Create policy' }}
-          </button>
+          @if (auth.canOperate()) {
+            <button
+              type="submit"
+              class="btn primary"
+              [disabled]="f.invalid || sources().length === 0 || saving()"
+            >
+              {{ id() ? 'Save changes' : 'Create policy' }}
+            </button>
+          }
           <a class="btn" [routerLink]="['/agents', agentIdResolved()]">Cancel</a>
         </div>
       </form>
@@ -368,6 +346,7 @@ function supportedTimeZones(): string[] {
   `,
 })
 export class PolicyEditorPage {
+  protected readonly auth = inject(AuthService);
   /** Set when editing (/policies/:id). */
   readonly id = input<string>();
   /** Set when creating (/agents/:agentId/policies/new). */
@@ -397,6 +376,10 @@ export class PolicyEditorPage {
     const target = this.storageTargets.value()?.find((s) => s.id === agent?.storageTargetId);
     return target && agent ? `${target.name}: ${target.bucket}/${agent.storagePrefix}` : '…';
   });
+  private readonly connectionsResource = httpResource<PgConnection[]>(() =>
+    this.agentIdResolved() ? `/api/admin/agents/${this.agentIdResolved()}/connections` : undefined,
+  );
+  protected readonly connections = computed(() => this.connectionsResource.value() ?? []);
 
   protected name = '';
   protected enabled = true;
@@ -456,9 +439,10 @@ export class PolicyEditorPage {
   }
 
   protected addSource(type: SourceForm['type']): void {
+    const connectionId = type === 'postgres' ? (this.connections()[0]?.id ?? '') : '';
     this.sources.update((list) => [
       ...list,
-      newSource(type, list.filter((s) => s.type === type).length + 1),
+      newSource(type, list.filter((s) => s.type === type).length + 1, connectionId),
     ]);
   }
 

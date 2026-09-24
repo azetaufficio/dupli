@@ -46,12 +46,36 @@ export const TERMINAL_STATES: readonly JobState[] = [
   'Missed',
 ];
 
+/** Ordered: each role includes the permissions of the ones before it. */
+export const OPERATOR_ROLES = ['Viewer', 'Operator', 'Owner'] as const;
+export type OperatorRole = (typeof OPERATOR_ROLES)[number];
+
 export interface UserInfo {
   authenticated: boolean;
-  mode: 'None' | 'EntraId' | 'Development';
+  mode: 'None' | 'EntraId';
   name: string | null;
   email: string | null;
-  authorized: boolean;
+  role: OperatorRole | null;
+}
+
+export interface OperatorUser {
+  id: string;
+  email: string;
+  role: OperatorRole;
+  displayName: string | null;
+  /** False while the invitation has not been used for a first sign-in. */
+  bound: boolean;
+  lastLoginAt: string | null;
+  disabledAt: string | null;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface InviteOperatorRequest {
+  email: string;
+  role: OperatorRole;
 }
 
 export interface StorageTarget {
@@ -165,18 +189,36 @@ export type DatabaseSelection = 'AllExcept' | 'Only';
 export interface PostgresSource {
   type: 'postgres';
   sourceId: string;
-  host: string;
-  port: number;
-  username: string;
-  passwordSecret: string;
+  connectionId: string;
   databaseSelection: DatabaseSelection;
   excludeDatabases: string[];
   includeDatabases: string[];
   includeGlobals: boolean;
-  binDirectory: string | null;
 }
 
 export type BackupSource = DirectorySource | PostgresSource;
+
+export interface PgConnection {
+  id: string;
+  agentId: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  passwordSecret: string;
+  binDirectory: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PgConnectionRequest {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  passwordSecret: string;
+  binDirectory: string | null;
+}
 
 export interface PolicyRequest {
   name: string;
@@ -315,6 +357,8 @@ export interface Snapshot {
   type: string | null;
   /** PostgreSQL database ('_globals' = roles/tablespaces). */
   database: string | null;
+  /** Connection of the policy source that produced this snapshot, if the policy still exists. UI default only. */
+  connectionId: string | null;
 }
 
 export type SnapshotNodeType = 'File' | 'Directory' | 'Symlink' | 'Other';
@@ -332,4 +376,5 @@ export interface CreateRestoreRequest {
   includes: string[];
   targetDirectory: string | null;
   newDatabase: string | null;
+  connectionId: string | null;
 }

@@ -47,40 +47,43 @@ public static class AdminApi
 
     public static void MapAdminApi(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").RequireAuthorization(AuthConstants.AdminPolicy).RequireAntiforgeryForCookies();
+        // Reads need any operator role; every write is mapped on `operate` or `own` (enforced by a test).
+        var admin = app.MapGroup("/api/admin").RequireAuthorization(AuthConstants.ViewerPolicy).RequireAntiforgeryForCookies();
+        var operate = admin.MapGroup("").RequireAuthorization(AuthConstants.OperatorPolicy);
+        var own = admin.MapGroup("").RequireAuthorization(AuthConstants.OwnerPolicy);
 
         admin.MapGet("/dashboard", DashboardAsync);
         admin.MapGet("/cron/preview", CronPreview);
 
         admin.MapGet("/storage-targets", async (DupliDbContext db, CancellationToken ct) =>
             (await db.StorageTargets.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct)).Select(ToDto));
-        admin.MapPost("/storage-targets", CreateStorageTargetAsync);
+        own.MapPost("/storage-targets", CreateStorageTargetAsync);
 
         admin.MapGet("/agents", ListAgentsAsync);
         admin.MapGet("/agents/{id:guid}", GetAgentAsync);
-        admin.MapPost("/agents", CreateAgentAsync);
-        admin.MapPost("/agents/{id:guid}/enrollment-tokens", CreateEnrollmentTokenAsync);
-        admin.MapPost("/agents/{id:guid}/disable", (Guid id, DupliDbContext db, CancellationToken ct) => SetStatusAsync(id, AgentStatus.Disabled, db, ct));
-        admin.MapPost("/agents/{id:guid}/enable", EnableAsync);
-        admin.MapPost("/agents/{id:guid}/jobs", RunSystemJobAsync);
-        admin.MapPut("/agents/{id:guid}/update-settings", UpdateAgentSettingsAsync);
+        operate.MapPost("/agents", CreateAgentAsync);
+        operate.MapPost("/agents/{id:guid}/enrollment-tokens", CreateEnrollmentTokenAsync);
+        operate.MapPost("/agents/{id:guid}/disable", (Guid id, DupliDbContext db, CancellationToken ct) => SetStatusAsync(id, AgentStatus.Disabled, db, ct));
+        operate.MapPost("/agents/{id:guid}/enable", EnableAsync);
+        operate.MapPost("/agents/{id:guid}/jobs", RunSystemJobAsync);
+        operate.MapPut("/agents/{id:guid}/update-settings", UpdateAgentSettingsAsync);
 
         admin.MapGet("/policies", async (DupliDbContext db, CancellationToken ct) =>
             (await db.Policies.AsNoTracking().Include(p => p.Sources).OrderBy(p => p.Name).ToListAsync(ct)).Select(ToDto));
         admin.MapGet("/agents/{id:guid}/policies", async (Guid id, DupliDbContext db, CancellationToken ct) =>
             (await db.Policies.AsNoTracking().Include(p => p.Sources).Where(p => p.AgentId == id).OrderBy(p => p.Name).ToListAsync(ct))
                 .Select(ToDto));
-        admin.MapPost("/agents/{id:guid}/policies", CreatePolicyAsync);
+        operate.MapPost("/agents/{id:guid}/policies", CreatePolicyAsync);
         admin.MapGet("/policies/{id:guid}", async (Guid id, DupliDbContext db, CancellationToken ct) =>
             ToDto(await LoadPolicyAsync(id, db, ct, tracking: false)));
-        admin.MapPut("/policies/{id:guid}", UpdatePolicyAsync);
-        admin.MapDelete("/policies/{id:guid}", DeletePolicyAsync);
-        admin.MapPost("/policies/{id:guid}/run", RunPolicyAsync);
+        operate.MapPut("/policies/{id:guid}", UpdatePolicyAsync);
+        operate.MapDelete("/policies/{id:guid}", DeletePolicyAsync);
+        operate.MapPost("/policies/{id:guid}/run", RunPolicyAsync);
 
         admin.MapGet("/jobs", ListJobsAsync);
         admin.MapGet("/jobs/{id:guid}", async (Guid id, DupliDbContext db, CancellationToken ct) =>
             ToDto(await db.Jobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct) ?? throw ApiException.NotFound("Job")));
-        admin.MapPost("/jobs/{id:guid}/cancel", async (Guid id, JobService jobs, CancellationToken ct) =>
+        operate.MapPost("/jobs/{id:guid}/cancel", async (Guid id, JobService jobs, CancellationToken ct) =>
             ToDto(await jobs.RequestCancelAsync(id, ct)));
 
         admin.MapGet("/runs", ListRunsAsync);
@@ -88,12 +91,14 @@ public static class AdminApi
         admin.MapGet("/alerts", ListAlertsAsync);
 
         admin.MapGet("/releases", ListReleasesAsync);
-        admin.MapPost("/releases/restic", CreateReleaseAsync);
-        admin.MapPost("/releases/agent", CreateAgentReleaseAsync);
-        admin.MapPost("/releases/agent/import", ImportAgentReleaseAsync);
-        admin.MapPost("/releases/{id:guid}/make-current", MakeCurrentAsync);
+        own.MapPost("/releases/restic", CreateReleaseAsync);
+        own.MapPost("/releases/agent", CreateAgentReleaseAsync);
+        own.MapPost("/releases/agent/import", ImportAgentReleaseAsync);
+        own.MapPost("/releases/{id:guid}/make-current", MakeCurrentAsync);
 
         admin.MapRestoreApi();
+        admin.MapConnectionsApi();
+        app.MapUsersApi();
     }
 
     private static async Task<IResult> CreateStorageTargetAsync(CreateStorageTargetRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
@@ -225,6 +230,7 @@ public static class AdminApi
         PolicyValidator.Validate(request);
         if (!await db.Agents.AnyAsync(a => a.Id == id, ct))
             throw ApiException.NotFound("Agent");
+        await PolicyValidator.ValidateConnectionsAsync(request, id, db, ct);
 
         var now = time.GetUtcNow();
         var policy = new BackupPolicy { Id = Guid.NewGuid(), AgentId = id, Name = "", Cron = "", CreatedAt = now };
@@ -238,6 +244,7 @@ public static class AdminApi
     {
         PolicyValidator.Validate(request);
         var policy = await LoadPolicyAsync(id, db, ct, tracking: true);
+        await PolicyValidator.ValidateConnectionsAsync(request, policy.AgentId, db, ct);
         db.Sources.RemoveRange(policy.Sources);
         policy.Sources.Clear();
         Apply(policy, request, time.GetUtcNow());
@@ -545,7 +552,7 @@ public static class AdminApi
         return await (tracking ? query : query.AsNoTracking()).SingleOrDefaultAsync(ct) ?? throw ApiException.NotFound("Policy");
     }
 
-    private static async Task SaveOrConflictAsync(DupliDbContext db, string conflictMessage, CancellationToken ct)
+    internal static async Task SaveOrConflictAsync(DupliDbContext db, string conflictMessage, CancellationToken ct)
     {
         try
         {

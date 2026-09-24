@@ -96,3 +96,21 @@ public sealed class StorageTarget
     public string? Region { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+/// <summary>
+/// A reusable PostgreSQL connection on an agent, referenced by policy sources via <c>ConnectionId</c>.
+/// The password itself never appears here: only the name of the secret holding it in the agent's local store.
+/// </summary>
+public sealed class PgConnection
+{
+    public Guid Id { get; set; }
+    public Guid AgentId { get; set; }
+    public required string Name { get; set; }
+    public string Host { get; set; } = "localhost";
+    public int Port { get; set; } = 5432;
+    public required string Username { get; set; }
+    public required string PasswordSecret { get; set; }
+    public string? BinDirectory { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}

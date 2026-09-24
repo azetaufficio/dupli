@@ -8,6 +8,12 @@ const string adminKey = "aspire-dev-admin-key";
 const string s3AccessKey = "dupli-dev";
 const string s3SecretKey = "dupli-dev-secret";
 
+// Operators sign in with a dev Entra ID app registration, as in production (Parameters:* in the AppHost user secrets).
+var entraTenantId = builder.AddParameter("entra-tenant-id");
+var entraClientId = builder.AddParameter("entra-client-id");
+var entraClientSecret = builder.AddParameter("entra-client-secret", secret: true);
+var bootstrapOwnerEmail = builder.AddParameter("bootstrap-owner-email");
+
 var postgres = builder.AddPostgres("postgres")
     .WithImageTag("18"); // the agent image ships pg_dump 18
 var dupliDb = postgres.AddDatabase("Dupli", databaseName: "dupli");
@@ -27,7 +33,11 @@ var smtp = mailpit.GetEndpoint("smtp");
 var server = builder.AddProject<Projects.Dupli_Server>("server", launchProfileName: "http")
     .WithReference(dupliDb)
     .WaitFor(dupliDb)
-    .WithEnvironment("Dupli__Auth__Mode", "Development")
+    .WithEnvironment("Dupli__Auth__Mode", "EntraId")
+    .WithEnvironment("Dupli__Auth__EntraId__TenantId", entraTenantId)
+    .WithEnvironment("Dupli__Auth__EntraId__ClientId", entraClientId)
+    .WithEnvironment("Dupli__Auth__EntraId__ClientSecret", entraClientSecret)
+    .WithEnvironment("Dupli__Auth__BootstrapOwnerEmail", bootstrapOwnerEmail)
     .WithEnvironment("Dupli__Admin__ApiKey", adminKey)
     // Lets a locally built agent be registered as a release with a file:// source, to try updates and rollbacks.
     .WithEnvironment("Dupli__Releases__AllowInsecureSources", "true")

@@ -1,9 +1,10 @@
-import { HttpContext } from '@angular/common/http';
+import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
+import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
-import { Job, Snapshot, SnapshotNode } from '../core/models';
+import { Job, PgConnection, Snapshot, SnapshotNode } from '../core/models';
 import { ToastService } from '../core/toast.service';
 import { ConfirmService } from './confirm';
 import { BytesPipe, DateTimePipe } from './format';
@@ -92,9 +93,11 @@ export function toResticTreePath(rawPath: string): string {
                   </td>
                   <td class="mono">{{ s.shortId }}</td>
                   <td class="num">
-                    <button type="button" class="btn small" (click)="open(s)">
-                      {{ s.type === 'pg' ? 'Restore' : 'Browse' }}
-                    </button>
+                    @if (auth.canOperate()) {
+                      <button type="button" class="btn small" (click)="open(s)">
+                        {{ s.type === 'pg' ? 'Restore' : 'Browse' }}
+                      </button>
+                    }
                   </td>
                 </tr>
               }
@@ -209,6 +212,15 @@ export function toResticTreePath(rawPath: string): string {
           @if (toDatabase) {
             <div class="form-row">
               <label class="field">
+                Target connection
+                <select name="targetConnection" [(ngModel)]="targetConnectionId">
+                  <option value="" disabled>Select a connection…</option>
+                  @for (c of connections(); track c.id) {
+                    <option [value]="c.id">{{ c.name }}</option>
+                  }
+                </select>
+              </label>
+              <label class="field">
                 New database name
                 <input
                   name="newDb"
@@ -216,7 +228,8 @@ export function toResticTreePath(rawPath: string): string {
                   [placeholder]="s.database + '_restore'"
                 />
                 <span class="hint"
-                  >Created on {{ s.sourceId }}; the restore fails if it already exists.</span
+                  >Created on {{ connectionName(targetConnectionId) }}; the restore fails if it
+                  already exists.</span
                 >
               </label>
               <label class="field">
@@ -263,6 +276,7 @@ export function toResticTreePath(rawPath: string): string {
   `,
 })
 export class SnapshotBrowser {
+  protected readonly auth = inject(AuthService);
   readonly agentId = input.required<string>();
   /** Emitted when a restore job is queued. */
   readonly restored = output<Job>();
@@ -290,6 +304,12 @@ export class SnapshotBrowser {
   protected toDatabase = false;
   protected newDatabase = '';
   protected newDatabaseConfirm = '';
+  protected targetConnectionId = '';
+
+  private readonly connectionsResource = httpResource<PgConnection[]>(
+    () => `/api/admin/agents/${this.agentId()}/connections`,
+  );
+  protected readonly connections = computed(() => this.connectionsResource.value() ?? []);
 
   protected readonly policyOptions = computed(() => {
     const seen = new Map<string, string>();
@@ -314,7 +334,7 @@ export class SnapshotBrowser {
 
   protected readonly canRestoreDatabase = computed(() => {
     const s = this.selected();
-    return s?.type === 'pg' && !!s.database && s.database !== GLOBALS && !!s.policyName;
+    return s?.type === 'pg' && !!s.database && s.database !== GLOBALS;
   });
 
   constructor() {
@@ -344,8 +364,13 @@ export class SnapshotBrowser {
     this.toDatabase = false;
     this.newDatabase = '';
     this.newDatabaseConfirm = '';
+    this.targetConnectionId = s.connectionId ?? '';
     // Start at the backed-up folder: the levels above it hold nothing else.
     this.browse(s.type === 'dir' && s.paths.length === 1 ? toResticTreePath(s.paths[0]) : '/');
+  }
+
+  protected connectionName(id: string): string {
+    return this.connections().find((c) => c.id === id)?.name ?? 'the selected connection';
   }
 
   protected close(): void {
@@ -405,6 +430,7 @@ export class SnapshotBrowser {
 
   protected databaseConfirmed(): boolean {
     if (!this.toDatabase) return true;
+    if (!this.targetConnectionId) return false;
     const name = this.newDatabase.trim();
     return name.length > 0 && name === this.newDatabaseConfirm.trim();
   }
@@ -426,6 +452,7 @@ export class SnapshotBrowser {
         includes: this.selection(),
         targetDirectory: this.targetDirectory.trim() || null,
         newDatabase,
+        connectionId: newDatabase ? this.targetConnectionId : null,
       })
       .subscribe({
         next: (job) => {

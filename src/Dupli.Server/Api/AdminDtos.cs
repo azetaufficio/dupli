@@ -1,8 +1,10 @@
+using System.Text.Json.Serialization;
 using Dupli.Contracts.Jobs;
 using Dupli.Contracts.Policies;
 using Dupli.Server.Domain.Agents;
 using Dupli.Server.Domain.Jobs;
 using Dupli.Server.Domain.Monitoring;
+using Dupli.Server.Domain.Operators;
 
 namespace Dupli.Server.Api;
 
@@ -67,7 +69,7 @@ public sealed record PolicyRequest
     public string TimeZone { get; init; } = "Europe/Rome";
     public bool Enabled { get; init; } = true;
     public RetentionDto Retention { get; init; } = new();
-    public required IReadOnlyList<BackupSourceDto> Sources { get; init; }
+    public required IReadOnlyList<PolicySourceDto> Sources { get; init; }
 }
 
 public sealed record PolicyDto(
@@ -78,9 +80,62 @@ public sealed record PolicyDto(
     string TimeZone,
     bool Enabled,
     RetentionDto Retention,
-    IReadOnlyList<BackupSourceDto> Sources,
+    IReadOnlyList<PolicySourceDto> Sources,
     DateTimeOffset? NextRunAt,
     DateTimeOffset? LastScheduledFor);
+
+/// <summary>
+/// Admin-facing source shape, stored as <c>BackupSource.Spec</c>. Distinct from the agent contract
+/// <c>BackupSourceDto</c>: a postgres source here references a <see cref="PgConnectionDto"/> by id instead
+/// of embedding host/port/credentials, which are resolved server-side when building the agent job payload.
+/// </summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(PolicyDirectorySourceDto), "directory")]
+[JsonDerivedType(typeof(PolicyPostgresSourceDto), "postgres")]
+public abstract record PolicySourceDto
+{
+    public required string SourceId { get; init; }
+}
+
+public sealed record PolicyDirectorySourceDto : PolicySourceDto
+{
+    public required IReadOnlyList<string> Paths { get; init; }
+    public IReadOnlyList<string> Excludes { get; init; } = [];
+}
+
+public sealed record PolicyPostgresSourceDto : PolicySourceDto
+{
+    public required Guid ConnectionId { get; init; }
+    public DatabaseSelection DatabaseSelection { get; init; } = DatabaseSelection.AllExcept;
+    public IReadOnlyList<string> ExcludeDatabases { get; init; } = [];
+    public IReadOnlyList<string> IncludeDatabases { get; init; } = [];
+    public bool IncludeGlobals { get; init; } = true;
+}
+
+public sealed record PgConnectionRequest
+{
+    public required string Name { get; init; }
+    public string Host { get; init; } = "localhost";
+    public int Port { get; init; } = 5432;
+    public required string Username { get; init; }
+
+    /// <summary>Name of the secret holding the password in the agent's local secret store, not the password.</summary>
+    public required string PasswordSecret { get; init; }
+
+    public string? BinDirectory { get; init; }
+}
+
+public sealed record PgConnectionDto(
+    Guid Id,
+    Guid AgentId,
+    string Name,
+    string Host,
+    int Port,
+    string Username,
+    string PasswordSecret,
+    string? BinDirectory,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 public sealed record RunSystemJobRequest(JobType Type);
 
@@ -167,7 +222,10 @@ public sealed record SnapshotDto(
     string? Type,
 
     /// <summary>PostgreSQL database of a <c>pg</c> snapshot (<c>_globals</c> for roles/tablespaces).</summary>
-    string? Database);
+    string? Database,
+
+    /// <summary>Connection of the policy source that produced this snapshot, if the policy still exists. UI default only.</summary>
+    Guid? ConnectionId);
 
 public sealed record SnapshotNodeDto(string Name, string Path, Dupli.Agent.Core.Backup.SnapshotNodeType Type, long Size, DateTimeOffset? ModifiedAt);
 
@@ -183,4 +241,25 @@ public sealed record CreateRestoreRequest
 
     /// <summary>PostgreSQL snapshot only: also <c>pg_restore</c> into this new database.</summary>
     public string? NewDatabase { get; init; }
+
+    /// <summary>Agent connection to create the new database on. Required when <see cref="NewDatabase"/> is set.</summary>
+    public Guid? ConnectionId { get; init; }
 }
+
+/// <param name="Bound">False while the invitation has not been used for a first sign-in.</param>
+public sealed record OperatorUserDto(
+    Guid Id,
+    string Email,
+    OperatorRole Role,
+    string? DisplayName,
+    bool Bound,
+    DateTimeOffset? LastLoginAt,
+    DateTimeOffset? DisabledAt,
+    DateTimeOffset CreatedAt,
+    string CreatedBy,
+    DateTimeOffset UpdatedAt,
+    string UpdatedBy);
+
+public sealed record InviteOperatorRequest(string Email, OperatorRole Role);
+
+public sealed record UpdateOperatorRequest(OperatorRole Role);

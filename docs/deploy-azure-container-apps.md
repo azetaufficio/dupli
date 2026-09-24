@@ -172,9 +172,7 @@ L'URL `https://<app>.<dominio-ambiente>` si conosce già adesso, prima di creare
    - Lascia disattivati *Access tokens* e *ID tokens* (implicit flow): il server usa authorization code + PKCE.
 3. **Certificates & secrets → New client secret**: copia il *Value*, che diventa `ENTRA_CLIENT_SECRET`. Segna la scadenza e mettiti un promemoria per rinnovarlo.
 4. **Overview**: copia *Application (client) ID* (`ENTRA_CLIENT_ID`) e *Directory (tenant) ID* (`ENTRA_TENANT_ID`).
-5. Limita chi può entrare. Scegli **una** delle due strade:
-   - **Semplice:** Enterprise applications → Dupli → Properties → *Assignment required* = **Yes**, poi in *Users and groups* aggiungi gli operatori (o un gruppo).
-   - **Con ruolo:** in App registration → App roles, crea il ruolo `Dupli.Operator` (Allowed member types: Users/Groups; Value: `Dupli.Operator`). Assegnalo in Enterprise applications → Users and groups, e imposta `ENTRA_REQUIRED_ROLE=Dupli.Operator`. Conviene tenere anche *Assignment required* = Yes.
+5. Chi può entrare, e con quale ruolo (`Owner`, `Operator`, `Viewer`), si decide in Dupli, dalla pagina **Users**. Al primo avvio la tabella utenti è vuota: entra solo l'email indicata in `DUPLI_BOOTSTRAP_OWNER_EMAIL`, che diventa `Owner`. Gli altri vanno invitati per email; al primo accesso l'invito viene legato all'account Entra (`oid`). Facoltativo: Enterprise applications → Dupli → Properties → *Assignment required* = **Yes**, per bloccare già in Entra chi non è assegnato.
 
 ### Da CLI (alternativa)
 ```bash
@@ -185,7 +183,7 @@ ENTRA_CLIENT_ID=$(az ad app create --display-name Dupli --sign-in-audience Azure
 az ad sp create --id $ENTRA_CLIENT_ID
 ENTRA_CLIENT_SECRET=$(az ad app credential reset --id $ENTRA_CLIENT_ID --display-name dupli-server --years 1 --query password -o tsv)
 ```
-Poi fai il passo 5 (assignment/ruolo) dal portale.
+Il passo 5 (facoltativo: *Assignment required*) si fa dal portale.
 
 ---
 
@@ -206,7 +204,7 @@ Genera la chiave di firma dei token agent. È opzionale, ma se la fissi un riavv
 ```bash
 SIGNING_KEY=$(openssl rand -base64 32)
 export LOC ENV_ID IMAGE FQDN KV IDENTITY_ID IDENTITY_CLIENT_ID DB_CONNECTION SIGNING_KEY ENTRA_TENANT_ID ENTRA_CLIENT_ID ENTRA_CLIENT_SECRET
-export ENTRA_REQUIRED_ROLE=""            # oppure Dupli.Operator
+export DUPLI_BOOTSTRAP_OWNER_EMAIL=tu@tuodominio.it   # primo Owner, vedi punto 6.5
 export O365_TENANT_ID=... O365_CLIENT_ID=... O365_CLIENT_SECRET=... O365_FROM=dupli@tuodominio.it O365_TO=ops@tuodominio.it
 ```
 
@@ -267,8 +265,8 @@ properties:
             value: ${ENTRA_CLIENT_ID}
           - name: Dupli__Auth__EntraId__ClientSecret
             secretRef: entra-client-secret
-          - name: Dupli__Auth__EntraId__RequiredRole
-            value: "${ENTRA_REQUIRED_ROLE}"
+          - name: Dupli__Auth__BootstrapOwnerEmail
+            value: ${DUPLI_BOOTSTRAP_OWNER_EMAIL}
           - name: Notifications__Channel
             value: Office365
           - name: Notifications__Office365__TenantId
@@ -301,6 +299,8 @@ properties:
 
 Il template non imposta `Dupli__Admin__ApiKey`, quindi la chiave admin resta disattivata: in produzione si usa solo il login Entra. Se ti serve per degli script, aggiungila come secret.
 
+**Recupero accessi (break-glass):** se nessun Owner riesce più a entrare (account disabilitato, persona uscita dall'azienda), imposta temporaneamente `Dupli__Admin__ApiKey`, riavvia e apri `https://<FQDN>/admin`. Con la chiave si apre una sessione di 15 minuti che permette solo di gestire gli utenti (invitare un nuovo Owner, riabilitare o cancellare utenti). Poi togli di nuovo la chiave.
+
 Crea l'app senza lasciare file con segreti su disco:
 ```bash
 envsubst < deploy/azure/containerapp.template.yaml > /tmp/dupli-app.yaml
@@ -321,7 +321,7 @@ Nei log del primo avvio devi vedere:
 Poi dal browser:
 1. `https://<FQDN>` ti porta al login Microsoft e poi alla dashboard vuota.
 2. In alto a destra compare il tuo nome; *Sign out* ti riporta al login.
-3. Un utente non assegnato all'app viene bloccato da Entra (o vede "not authorized" se usi il ruolo).
+3. Un account non invitato in Dupli vede la pagina *Access denied* (o viene bloccato già da Entra se hai attivato *Assignment required*).
 
 Dopo il primo avvio controlla che il vault contenga il key ring:
 ```bash
