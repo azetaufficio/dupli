@@ -17,6 +17,17 @@ function crumbs(path: string): { name: string; path: string }[] {
 }
 
 /**
+ * Converts the raw OS path given to `restic backup` into restic's internal tree-path form.
+ * Windows: "D:\Data\x" or "D:/Data/x" → "/D/Data/x" (drive letter as the first segment, forward slashes).
+ * POSIX paths already match restic's tree form and pass through unchanged.
+ */
+export function toResticTreePath(rawPath: string): string {
+  const slashed = rawPath.replace(/\\/g, '/');
+  const drive = /^([A-Za-z]):\//.exec(slashed);
+  return drive ? `/${drive[1]}${slashed.slice(2)}` : slashed;
+}
+
+/**
  * Snapshot list and browser of an agent's repository (read by the server), plus the restore form.
  * The restore itself is a job run by the agent, into an alternative directory.
  */
@@ -115,6 +126,8 @@ function crumbs(path: string): { name: string; path: string }[] {
 
       @if (treeLoading()) {
         <p class="muted">Loading…</p>
+      } @else if (treeError()) {
+        <p class="error-box">{{ treeError() }}</p>
       } @else if (nodes().length === 0) {
         <div class="empty">Empty directory.</div>
       } @else {
@@ -269,6 +282,7 @@ export class SnapshotBrowser {
   protected readonly path = signal('/');
   protected readonly nodes = signal<SnapshotNode[]>([]);
   protected readonly treeLoading = signal(false);
+  protected readonly treeError = signal<string | null>(null);
   protected readonly selection = signal<string[]>([]);
   protected readonly submitting = signal(false);
 
@@ -331,7 +345,7 @@ export class SnapshotBrowser {
     this.newDatabase = '';
     this.newDatabaseConfirm = '';
     // Start at the backed-up folder: the levels above it hold nothing else.
-    this.browse(s.type === 'dir' && s.paths.length === 1 ? s.paths[0] : '/');
+    this.browse(s.type === 'dir' && s.paths.length === 1 ? toResticTreePath(s.paths[0]) : '/');
   }
 
   protected close(): void {
@@ -344,12 +358,17 @@ export class SnapshotBrowser {
     if (!s) return;
     this.path.set(path);
     this.treeLoading.set(true);
-    this.api.snapshotTree(this.agentId(), s.id, path).subscribe({
+    this.treeError.set(null);
+    const silent = new HttpContext().set(SILENT_ERRORS, true);
+    this.api.snapshotTree(this.agentId(), s.id, path, silent).subscribe({
       next: (nodes) => {
         this.nodes.set(nodes);
         this.treeLoading.set(false);
       },
-      error: () => this.treeLoading.set(false),
+      error: (err: unknown) => {
+        this.treeError.set(`Cannot read this folder: ${problemMessage(err)}`);
+        this.treeLoading.set(false);
+      },
     });
   }
 

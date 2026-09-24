@@ -96,7 +96,7 @@ public static class Commands
     public static Task<int> SecretSetAsync(AgentPaths paths, string name, CancellationToken ct)
     {
         paths.EnsureCreated();
-        var value = Console.In.ReadToEnd().TrimEnd('\r', '\n');
+        var value = ReadSecretValue(Console.IsInputRedirected, Console.In);
         if (string.IsNullOrEmpty(value))
             throw new InvalidOperationException("No value provided on stdin");
 
@@ -104,6 +104,41 @@ public static class Commands
         secrets.Set(name, value);
         Console.WriteLine($"Secret '{name}' stored.");
         return Task.FromResult(0);
+    }
+
+    /// <summary>
+    /// Piped/redirected stdin (e.g. <c>echo secret | dupli-agent secret set name</c>) reads to EOF; an interactive
+    /// console never reaches EOF on Enter, so it reads a single masked line instead.
+    /// </summary>
+    public static string ReadSecretValue(bool interactive, TextReader reader) =>
+        interactive ? ReadSecretInteractive() : reader.ReadToEnd().TrimEnd('\r', '\n');
+
+    /// <summary>Reads a line from an interactive console, masking each typed character as '*' so the secret never appears in clear text.</summary>
+    private static string ReadSecretInteractive()
+    {
+        var value = new System.Text.StringBuilder();
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                return value.ToString();
+            }
+            if (key.Key == ConsoleKey.Backspace)
+            {
+                if (value.Length > 0)
+                {
+                    value.Length--;
+                    Console.Write("\b \b");
+                }
+                continue;
+            }
+            if (key.KeyChar == '\0')
+                continue;
+            value.Append(key.KeyChar);
+            Console.Write('*');
+        }
     }
 
     /// <summary>Rotates the AgentSecret. The new value is stored before anything else can fail.</summary>

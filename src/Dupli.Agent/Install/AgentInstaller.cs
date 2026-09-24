@@ -66,8 +66,7 @@ public static class AgentInstaller
         if (OperatingSystem.IsWindows())
         {
             await ConfigureWindowsServiceAsync(launcher, serviceExists, logger, cancellationToken);
-            if (serviceExists)
-                StartService(logger);
+            StartService(logger);
         }
         else
         {

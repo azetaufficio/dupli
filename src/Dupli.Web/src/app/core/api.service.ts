@@ -101,10 +101,15 @@ export class ApiService {
     });
   }
 
-  snapshotTree(agentId: string, snapshotId: string, path: string): Observable<SnapshotNode[]> {
+  snapshotTree(
+    agentId: string,
+    snapshotId: string,
+    path: string,
+    context?: HttpContext,
+  ): Observable<SnapshotNode[]> {
     return this.http.get<SnapshotNode[]>(
       `${this.base}/agents/${agentId}/snapshots/${snapshotId}/tree`,
-      { params: params({ path }) },
+      { params: params({ path }), context },
     );
   }
 
