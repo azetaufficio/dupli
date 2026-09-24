@@ -14,8 +14,9 @@ RUN case "$TARGETARCH" in arm64) rid=linux-arm64 ;; *) rid=linux-x64 ;; esac \
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 # curl + jq for the bootstrap script, pg_dump/pg_restore 18 from the PostgreSQL apt repository.
+# libgssapi-krb5-2: Npgsql (Dupli.Agent.Core) loads it for GSS negotiation even without Integrated Security.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl jq \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq libgssapi-krb5-2 \
  && install -d /usr/share/postgresql-common/pgdg \
  && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
  && . /etc/os-release \

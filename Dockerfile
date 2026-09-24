@@ -20,6 +20,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
 
+# Npgsql loads libgssapi_krb5 for GSS negotiation even without Integrated Security in the connection string.
+RUN apt-get update && apt-get install -y --no-install-recommends libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
+
 # Data Protection key ring and restic mirror: mounted volumes, separate from the database volume.
 RUN mkdir -p /var/lib/dupli/keys /var/lib/dupli/tools && chown -R app:app /var/lib/dupli
 VOLUME ["/var/lib/dupli/keys", "/var/lib/dupli/tools"]
