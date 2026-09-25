@@ -1,4 +1,5 @@
 using Dupli.Agent.Cli;
+using Dupli.Agent.Configuration;
 using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Errors;
 using Dupli.Agent.Restore;
@@ -18,15 +19,18 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
     public async Task<JobResultDto> ExecuteAsync(AgentJobDto job, CancellationToken cancellationToken)
     {
         var startedAt = time.GetUtcNow();
+        // Re-resolved every job (not the fixed one built at startup): a storage credentials rotation applied
+        // between jobs must take effect on the very next one, without waiting for the agent to restart.
+        var repository = runtime.Config.Repository.Resolve(runtime.Secrets, runtime.Config.ResticCacheDir ?? runtime.Paths.Cache);
         try
         {
             return job.Payload switch
             {
-                BackupJobPayload backup => await BackupAsync(backup, cancellationToken),
-                RetentionJobPayload retention => await RetentionAsync(retention, startedAt, cancellationToken),
-                RepositoryCheckJobPayload check => await CheckAsync(check, startedAt, cancellationToken),
-                RestoreTestJobPayload restoreTest => await RestoreTestAsync(job.JobId, restoreTest, startedAt, cancellationToken),
-                RestoreJobPayload restore => await RestoreAsync(job.JobId, restore, startedAt, cancellationToken),
+                BackupJobPayload backup => await BackupAsync(backup, repository, cancellationToken),
+                RetentionJobPayload retention => await RetentionAsync(retention, repository, startedAt, cancellationToken),
+                RepositoryCheckJobPayload check => await CheckAsync(check, repository, startedAt, cancellationToken),
+                RestoreTestJobPayload restoreTest => await RestoreTestAsync(job.JobId, restoreTest, repository, startedAt, cancellationToken),
+                RestoreJobPayload restore => await RestoreAsync(job.JobId, restore, repository, startedAt, cancellationToken),
                 // The restart itself happens after the result is recorded (see ServerAgentLoop).
                 RestartAgentJobPayload => new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow() },
                 _ => Failed(startedAt, $"Job type {job.Type} is not supported by this agent version", ErrorKind.Permanent),
@@ -49,10 +53,10 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         }
     }
 
-    private async Task<JobResultDto> BackupAsync(BackupJobPayload payload, CancellationToken ct)
+    private async Task<JobResultDto> BackupAsync(BackupJobPayload payload, RepositoryTarget repository, CancellationToken ct)
     {
         ledger.SavePolicy(payload.Policy, time.GetUtcNow());
-        var result = await runtime.PolicyRunner.RunAsync(payload.Policy, runtime.Repository, runtime.Config.Host, ct);
+        var result = await runtime.PolicyRunner.RunAsync(payload.Policy, repository, runtime.Config.Host, ct);
         var failed = result.Items.FirstOrDefault(i => i.Status == RunStatus.Failed);
 
         return new JobResultDto
@@ -76,10 +80,10 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         };
     }
 
-    private async Task<JobResultDto> RetentionAsync(RetentionJobPayload payload, DateTimeOffset startedAt, CancellationToken ct)
+    private async Task<JobResultDto> RetentionAsync(RetentionJobPayload payload, RepositoryTarget repository, DateTimeOffset startedAt, CancellationToken ct)
     {
-        await runtime.Engine.EnsureRepositoryAsync(runtime.Repository, ct);
-        await runtime.Engine.UnlockStaleAsync(runtime.Repository, ct);
+        await runtime.Engine.EnsureRepositoryAsync(repository, ct);
+        await runtime.Engine.UnlockStaleAsync(repository, ct);
 
         var items = new List<JobItemResultDto>();
         for (var i = 0; i < payload.Policies.Count; i++)
@@ -88,7 +92,7 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
             // prune is repository-wide: run it once, with the last forget.
             var prune = payload.Prune && i == payload.Policies.Count - 1;
             await runtime.Engine.ForgetAsync(new ForgetRequest(
-                runtime.Repository, runtime.Config.Host, [BackupTags.Policy(policy.PolicyId)],
+                repository, runtime.Config.Host, [BackupTags.Policy(policy.PolicyId)],
                 policy.Retention.KeepDaily, policy.Retention.KeepWeekly, policy.Retention.KeepMonthly, prune), ct);
             items.Add(new JobItemResultDto { SourceId = "retention", Item = policy.PolicyId, Outcome = JobOutcome.Succeeded });
         }
@@ -96,23 +100,23 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         return new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow(), Items = items };
     }
 
-    private async Task<JobResultDto> CheckAsync(RepositoryCheckJobPayload payload, DateTimeOffset startedAt, CancellationToken ct)
+    private async Task<JobResultDto> CheckAsync(RepositoryCheckJobPayload payload, RepositoryTarget repository, DateTimeOffset startedAt, CancellationToken ct)
     {
-        await runtime.Engine.UnlockStaleAsync(runtime.Repository, ct);
-        var result = await runtime.Engine.CheckAsync(runtime.Repository, payload.ReadDataSubsetPercent, ct);
+        await runtime.Engine.UnlockStaleAsync(repository, ct);
+        var result = await runtime.Engine.CheckAsync(repository, payload.ReadDataSubsetPercent, ct);
         return result.Success
             ? new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow() }
             : Failed(startedAt, string.Join('\n', result.Messages), ErrorKind.Permanent);
     }
 
-    private async Task<JobResultDto> RestoreTestAsync(string jobId, RestoreTestJobPayload payload, DateTimeOffset startedAt, CancellationToken ct)
+    private async Task<JobResultDto> RestoreTestAsync(string jobId, RestoreTestJobPayload payload, RepositoryTarget repository, DateTimeOffset startedAt, CancellationToken ct)
     {
         // Same rule as a manual restore: never inside a backed-up path.
         var workDirectory = RestoreGuard.ResolveTarget(
             Path.Combine(runtime.Paths.Tmp, "restore-test", jobId), jobId, runtime.Paths, payload.Policies);
 
-        await runtime.Engine.UnlockStaleAsync(runtime.Repository, ct);
-        var result = await runtime.RestoreTester.RunAsync(runtime.Repository, payload.Policies, payload.SampleFiles, workDirectory, ct);
+        await runtime.Engine.UnlockStaleAsync(repository, ct);
+        var result = await runtime.RestoreTester.RunAsync(repository, payload.Policies, payload.SampleFiles, workDirectory, ct);
         var failed = result.Items.Where(i => !i.Success).ToList();
 
         return new JobResultDto
@@ -134,7 +138,7 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         };
     }
 
-    private async Task<JobResultDto> RestoreAsync(string jobId, RestoreJobPayload payload, DateTimeOffset startedAt, CancellationToken ct)
+    private async Task<JobResultDto> RestoreAsync(string jobId, RestoreJobPayload payload, RepositoryTarget repository, DateTimeOffset startedAt, CancellationToken ct)
     {
         // Policies from the server plus the ones cached here: a stale server view must not open a hole in the guard.
         var policies = payload.Policies.Concat(ledger.KnownPolicies()).ToList();
@@ -143,7 +147,7 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
 
         logger.LogInformation("Restoring snapshot {SnapshotId} ({Count} includes) to {Target}",
             payload.SnapshotId, payload.Includes.Count, target);
-        await runtime.Engine.RestoreAsync(new RestoreRequest(runtime.Repository, payload.SnapshotId, target, payload.Includes), ct);
+        await runtime.Engine.RestoreAsync(new RestoreRequest(repository, payload.SnapshotId, target, payload.Includes), ct);
 
         var items = new List<JobItemResultDto>
         {

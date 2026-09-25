@@ -22,7 +22,6 @@ public sealed class GraphNotificationChannelTests
         ClientId = "client-1",
         ClientSecret = "secret",
         From = "dupli@contoso.com",
-        To = ["ops@contoso.com", ""],
     };
 
     [Fact]
@@ -32,7 +31,7 @@ public sealed class GraphNotificationChannelTests
         var credential = new FakeCredential();
         var channel = Channel(Configured, handler, credential);
 
-        await channel.SendAsync(new Notification("subject 1", "body 1"), CancellationToken.None);
+        await channel.SendAsync(new Notification("subject 1", "body 1"), ["ops@contoso.com"], CancellationToken.None);
 
         Assert.Equal(["https://graph.microsoft.com/.default"], credential.Scopes);
         // The SDK serializes action parameters as "Message"/"SaveToSentItems"; Graph accepts either casing.
@@ -68,33 +67,46 @@ public sealed class GraphNotificationChannelTests
         var options = new Office365Options
         {
             Credential = kind, TenantId = tenant, ClientId = client, ClientSecret = secret, CertificatePath = cert,
-            From = "dupli@contoso.com", To = ["ops@contoso.com"],
+            From = "dupli@contoso.com",
         };
         Assert.Equal(configured, options.IsConfigured);
     }
 
     [Fact]
-    public async Task Graph_error_is_thrown_so_the_alert_is_retried()
+    public async Task Graph_error_is_thrown_so_the_notification_is_retried()
     {
         var handler = new FakeGraph { SendMailStatus = HttpStatusCode.Forbidden };
         var channel = Channel(Configured, handler, new FakeCredential());
 
         var ex = await Assert.ThrowsAsync<ODataError>(
-            () => channel.SendAsync(new Notification("a", "b"), CancellationToken.None));
+            () => channel.SendAsync(new Notification("a", "b"), ["ops@contoso.com"], CancellationToken.None));
         Assert.Equal(403, ex.ResponseStatusCode);
         Assert.Equal("ErrorAccessDenied", ex.Error?.Code);
     }
 
     [Fact]
-    public async Task Unconfigured_channel_drops_the_notification()
+    public async Task Unconfigured_channel_throws_instead_of_sending()
     {
         var handler = new FakeGraph();
         var credential = new FakeCredential();
         var channel = Channel(new Office365Options { TenantId = "t" }, handler, credential);
 
-        await channel.SendAsync(new Notification("a", "b"), CancellationToken.None);
+        Assert.False(channel.IsConfigured);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => channel.SendAsync(new Notification("a", "b"), ["ops@contoso.com"], CancellationToken.None));
 
         Assert.Empty(credential.Scopes);
+        Assert.Empty(handler.Mails);
+    }
+
+    [Fact]
+    public async Task No_recipients_is_a_no_op()
+    {
+        var handler = new FakeGraph();
+        var channel = Channel(Configured, handler, new FakeCredential());
+
+        await channel.SendAsync(new Notification("a", "b"), [], CancellationToken.None);
+
         Assert.Empty(handler.Mails);
     }
 

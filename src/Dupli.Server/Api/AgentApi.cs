@@ -8,6 +8,7 @@ using Dupli.Server.Configuration;
 using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Hosting;
 using Dupli.Server.Infrastructure.Database;
+using Dupli.Server.Infrastructure.Security;
 using Dupli.Server.Jobs;
 using Dupli.Server.Tools;
 using Microsoft.Extensions.Options;
@@ -37,6 +38,7 @@ public static class AgentApi
         agent.MapPost("/agents/secret/rotate", (HttpContext http, EnrollmentService enrollment, CancellationToken ct) =>
             enrollment.RotateSecretAsync(http.User.AgentId(), ct));
         agent.MapGet("/agents/{agentId:guid}/jobs", JobsAsync);
+        agent.MapGet("/agents/storage-credentials", StorageCredentialsAsync);
         agent.MapPost("/agents/logs", (AgentLogBatchDto batch, HttpContext http, DupliDbContext db, CancellationToken ct) =>
             StoreLogsAsync(http.User.AgentId(), null, batch, db, ct));
 
@@ -94,9 +96,16 @@ public static class AgentApi
             agent.LastUpdateAt = lastUpdate.At;
         }
         agent.ResticUpdateError = request.ResticUpdateError;
-        await db.SaveChangesAsync(ct);
+        // Null means an agent too old to report it: leave whatever version we last recorded as applied.
+        if (request.StorageCredentialsVersion is { } appliedCredentials)
+            agent.S3CredentialsAppliedVersion = appliedCredentials;
 
         var (desiredAgent, desiredRestic) = await resolver.ResolveAsync(agent, ct);
+        agent.OutdatedSince = desiredAgent is not null && agent.Version != desiredAgent.Version
+            ? agent.OutdatedSince ?? now
+            : null;
+        await db.SaveChangesAsync(ct);
+
         var publicBaseUrl = PublicBaseUrl(http.Request, options.Value);
         return new HeartbeatResponse
         {
@@ -104,7 +113,24 @@ public static class AgentApi
             PollIntervalSeconds = options.Value.Agents.PollIntervalSeconds,
             DesiredAgent = desiredAgent is null ? null : ReleaseMirror.ToManifest(desiredAgent, publicBaseUrl),
             DesiredRestic = desiredRestic is null ? null : ReleaseMirror.ToManifest(desiredRestic, publicBaseUrl),
+            StorageCredentialsVersion = agent.S3CredentialsVersion,
         };
+    }
+
+    /// <summary>
+    /// The current S3 key for the agent's own repository, fetched when the heartbeat reports a
+    /// <see cref="HeartbeatResponse.StorageCredentialsVersion"/> ahead of what the agent has applied.
+    /// </summary>
+    private static async Task<IResult> StorageCredentialsAsync(HttpContext http, DupliDbContext db, SecretProtector protector, CancellationToken ct)
+    {
+        var agent = await db.Agents.FindAsync([http.User.AgentId()], ct) ?? throw ApiException.NotFound("Agent");
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.Ok(new StorageCredentialsResponse
+        {
+            Version = agent.S3CredentialsVersion,
+            AccessKeyId = agent.S3AccessKeyId,
+            SecretAccessKey = protector.Unprotect(agent.S3SecretKeyProtected),
+        });
     }
 
     private static Task<IReadOnlyList<AgentJobDto>> JobsAsync(Guid agentId, HttpContext http, JobService jobs, CancellationToken ct)

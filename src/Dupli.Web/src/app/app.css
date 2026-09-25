@@ -69,6 +69,126 @@ nav a.active {
   margin-left: auto;
 }
 
+.bell-wrap {
+  position: relative;
+}
+
+.bell {
+  position: relative;
+  line-height: 1;
+}
+
+.bell-badge {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 0.65rem;
+  line-height: 1.1rem;
+  text-align: center;
+}
+
+.bell-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: 20rem;
+  max-width: 90vw;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+
+.bell-dropdown ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.bell-dropdown li {
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.bell-dropdown li:hover {
+  background: var(--hover);
+}
+
+.bell-dropdown li.unread {
+  font-weight: 600;
+}
+
+.bell-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.85rem;
+}
+
+.menu-toggle {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .topbar {
+    gap: 0.75rem;
+    padding: 0 1rem;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 2.25rem;
+    height: 2.25rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    order: -1;
+  }
+
+  .menu-toggle span {
+    display: block;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--text);
+  }
+
+  nav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    padding: 0.5rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+
+  nav.open {
+    display: flex;
+  }
+
+  nav a {
+    padding: 0.65rem 0.75rem;
+  }
+}
+
 .content {
   flex: 1;
   width: 100%;
@@ -80,4 +200,10 @@ nav a.active {
 .notice {
   max-width: 40rem;
   margin: 3rem auto;
+}
+
+@media (max-width: 800px) {
+  .content {
+    padding: 1rem;
+  }
 }

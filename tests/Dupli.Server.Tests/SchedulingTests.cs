@@ -25,7 +25,7 @@ public sealed class SchedulingTests(PostgresFixture postgres) : IAsyncLifetime
         })).ReadAsync<PolicyDto>();
 
     private async Task<List<JobDto>> JobsAsync(Guid agentId, JobType? type = null) =>
-        (await (await _server.Admin().GetAsync($"/api/admin/jobs?agentId={agentId}")).ReadAsync<List<JobDto>>())
+        (await (await _server.Admin().GetAsync($"/api/admin/jobs?agentId={agentId}")).ReadAsync<PagedDto<JobDto>>()).Items
         .Where(j => type is null || j.Type == type).ToList();
 
     [Fact]
@@ -54,6 +54,8 @@ public sealed class SchedulingTests(PostgresFixture postgres) : IAsyncLifetime
     [Fact]
     public async Task Offline_agent_misses_the_window_and_alerts_are_deduplicated()
     {
+        // One Owner, e-mail on by default for every kind: fan-out sends exactly one notification per alert.
+        await _server.SeedOperatorUserAsync();
         var agent = await _server.EnrollAsync();
         await HourlyPolicyAsync(agent.AgentId);
 

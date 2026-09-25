@@ -1,7 +1,17 @@
 <header class="topbar">
   <a class="brand" routerLink="/">Dupli</a>
   @if (auth.role() && !auth.standalone()) {
-    <nav>
+    <button
+      type="button"
+      class="menu-toggle"
+      aria-label="Menu"
+      aria-controls="main-nav"
+      [attr.aria-expanded]="menuOpen()"
+      (click)="menuOpen.set(!menuOpen())"
+    >
+      <span></span><span></span><span></span>
+    </button>
+    <nav id="main-nav" [class.open]="menuOpen()">
       <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
         >Dashboard</a
       >
@@ -17,11 +27,50 @@
     </nav>
   }
   <div class="user">
+    @if (auth.role() && !auth.standalone()) {
+      <div class="bell-wrap">
+        <button
+          type="button"
+          class="btn small bell"
+          aria-label="Notifications"
+          [attr.aria-expanded]="bellOpen()"
+          (click)="toggleBell()"
+        >
+          🔔
+          @if (bellBadge(); as badge) {
+            <span class="bell-badge">{{ badge }}</span>
+          }
+        </button>
+        @if (bellOpen()) {
+          <div class="bell-dropdown">
+            @if (preview().length === 0) {
+              <div class="empty">No notifications.</div>
+            } @else {
+              <ul>
+                @for (n of preview(); track n.id) {
+                  <li [class.unread]="!n.readAt" (click)="openNotification(n)">
+                    <div>{{ n.subject }}</div>
+                    <div class="muted">{{ n.createdAt | relative }}</div>
+                  </li>
+                }
+              </ul>
+            }
+            <div class="bell-actions">
+              <button type="button" class="btn small" (click)="markAllRead()">Mark all read</button>
+              <a routerLink="/notifications" (click)="bellOpen.set(false)">See all</a>
+            </div>
+          </div>
+        }
+      </div>
+    }
     @if (auth.user(); as user) {
       @if (user.authenticated) {
         <span class="muted" [title]="(user.email ?? '') + ' · ' + (user.role ?? '')">{{
           user.name
         }}</span>
+        <a routerLink="/settings/notifications" routerLinkActive="active" class="btn small"
+          >Settings</a
+        >
         <button type="button" class="btn small" (click)="auth.logout()">Sign out</button>
       }
     }

@@ -26,6 +26,8 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<OperatorUser> OperatorUsers => Set<OperatorUser>();
+    public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
+    public DbSet<OperatorNotification> Notifications => Set<OperatorNotification>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -37,6 +39,12 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
             e.Property(x => x.Status).HasConversion<string>();
             e.Property(x => x.S3AccessKeyId).HasColumnName("s3_access_key_id");
             e.Property(x => x.S3SecretKeyProtected).HasColumnName("s3_secret_key_protected");
+            // The snake_case convention does not split "S3" the way we want (e.g. "s3credentials_version"):
+            // same reason S3AccessKeyId/S3SecretKeyProtected above are spelled out too.
+            e.Property(x => x.S3CredentialsVersion).HasColumnName("s3_credentials_version");
+            e.Property(x => x.S3CredentialsAppliedVersion).HasColumnName("s3_credentials_applied_version");
+            e.Property(x => x.S3CredentialsUpdatedAt).HasColumnName("s3_credentials_updated_at");
+            e.Property(x => x.S3CredentialsUpdatedBy).HasColumnName("s3_credentials_updated_by");
             e.HasOne(x => x.StorageTarget).WithMany().HasForeignKey(x => x.StorageTargetId);
         });
 
@@ -99,6 +107,24 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
             e.Property(x => x.Role).HasConversion<string>();
             e.Ignore(x => x.IsBound);
             e.Ignore(x => x.IsActive);
+        });
+
+        b.Entity<NotificationPreference>(e =>
+        {
+            e.ToTable("notification_preference");
+            e.HasKey(x => new { x.UserId, x.Kind });
+            e.Property(x => x.Kind).HasConversion<string>();
+            e.HasOne<OperatorUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<OperatorNotification>(e =>
+        {
+            e.ToTable("notification");
+            e.Property(x => x.Kind).HasConversion<string>();
+            e.Property(x => x.Event).HasConversion<string>();
+            e.Property(x => x.EmailStatus).HasConversion<string>();
+            e.HasOne<OperatorUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Alert>().WithMany().HasForeignKey(x => x.AlertId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

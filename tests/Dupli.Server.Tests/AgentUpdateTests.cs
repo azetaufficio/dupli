@@ -178,4 +178,39 @@ public sealed class AgentUpdateTests(PostgresFixture postgres) : IAsyncLifetime
         var openAlerts = await (await _server.Admin().GetAsync($"/api/admin/alerts?agentId={agent.AgentId}")).ReadAsync<List<AlertDto>>();
         Assert.DoesNotContain(openAlerts, a => a.Kind == AlertKind.AgentUpdateFailed);
     }
+
+    [Fact]
+    public async Task Agent_stuck_off_the_desired_version_opens_AgentOutdated_after_the_grace_period()
+    {
+        await using var server = new DupliTestServer(postgres, settings: new Dictionary<string, string?>
+        {
+            ["Dupli:Alerts:AgentOutdatedAfter"] = "00:00:01",
+        });
+        var agent = await server.EnrollAsync(); // registers on 0.1.0, windows_amd64, stable
+        Assert.Equal(HttpStatusCode.Created, (await server.Admin().PostJsonAsync("/api/admin/releases/agent",
+            new CreateAgentReleaseRequest("2.0.0", "windows_amd64", "stable", "https://example.com/dupli-agent_2.0.0_windows_amd64", Sha))).StatusCode);
+
+        var heartbeat = new HeartbeatRequest { Hostname = "vm-01", Version = "0.1.0", OsVersion = "Windows" };
+        await agent.Client.PostJsonAsync("/api/agents/heartbeat", heartbeat);
+        await server.TickAsync<AlertEvaluator>();
+
+        // Just went out of date: still inside the grace period.
+        var tooSoon = await (await server.Admin().GetAsync($"/api/admin/alerts?agentId={agent.AgentId}")).ReadAsync<List<AlertDto>>();
+        Assert.DoesNotContain(tooSoon, a => a.Kind == AlertKind.AgentOutdated);
+
+        server.Time.Advance(TimeSpan.FromSeconds(2));
+        await agent.Client.PostJsonAsync("/api/agents/heartbeat", heartbeat);
+        await server.TickAsync<AlertEvaluator>();
+
+        var alerts = await (await server.Admin().GetAsync($"/api/admin/alerts?agentId={agent.AgentId}")).ReadAsync<List<AlertDto>>();
+        var alert = Assert.Single(alerts, a => a.Kind == AlertKind.AgentOutdated);
+        Assert.Contains("2.0.0", alert.Message);
+
+        // Catches up to the desired version: the alert clears.
+        await agent.Client.PostJsonAsync("/api/agents/heartbeat", heartbeat with { Version = "2.0.0" });
+        await server.TickAsync<AlertEvaluator>();
+
+        var openAlerts = await (await server.Admin().GetAsync($"/api/admin/alerts?agentId={agent.AgentId}")).ReadAsync<List<AlertDto>>();
+        Assert.DoesNotContain(openAlerts, a => a.Kind == AlertKind.AgentOutdated);
+    }
 }

@@ -24,7 +24,19 @@ export type AlertKind =
   | 'BackupTooOld'
   | 'RepositoryCheckFailed'
   | 'RestoreTestFailed'
-  | 'AgentUpdateFailed';
+  | 'AgentUpdateFailed'
+  | 'AgentOutdated';
+
+export const ALERT_KINDS: readonly AlertKind[] = [
+  'AgentOffline',
+  'BackupFailed',
+  'BackupMissed',
+  'BackupTooOld',
+  'RepositoryCheckFailed',
+  'RestoreTestFailed',
+  'AgentUpdateFailed',
+  'AgentOutdated',
+];
 
 export type AgentPlatform = 'windows_amd64' | 'linux_amd64' | 'linux_arm64';
 export type AgentChannel = 'dev' | 'beta' | 'stable';
@@ -121,12 +133,22 @@ export interface Agent {
   lastUpdateError: string | null;
   lastUpdateAt: string | null;
   resticUpdateError: string | null;
+  s3AccessKeyId: string;
+  s3CredentialsVersion: number;
+  s3CredentialsAppliedVersion: number | null;
+  s3CredentialsUpdatedAt: string | null;
 }
 
 export interface UpdateAgentSettingsRequest {
   channel: AgentChannel;
   pinnedAgentVersion: string | null;
   pinnedResticVersion: string | null;
+}
+
+export interface UpdateAgentStorageCredentialsRequest {
+  accessKeyId: string;
+  secretAccessKey: string;
+  skipVerification: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -162,6 +184,12 @@ export interface DashboardAgent {
 export interface Dashboard {
   counters: DashboardCounters;
   agents: DashboardAgent[];
+}
+
+/** Keyset page: `next` is an opaque cursor for the next call's `before`, or null on the last page. */
+export interface Paged<T> {
+  items: T[];
+  next: string | null;
 }
 
 export interface CronPreview {
@@ -252,7 +280,9 @@ export interface JobItemResult {
 export interface Job {
   id: string;
   agentId: string;
+  agentName: string;
   policyId: string | null;
+  policyName: string | null;
   type: JobType;
   trigger: JobTrigger;
   state: JobState;
@@ -270,7 +300,9 @@ export interface Run {
   id: string;
   jobId: string;
   policyId: string;
+  policyName: string | null;
   agentId: string;
+  agentName: string;
   startedAt: string;
   completedAt: string;
   status: JobOutcome;
@@ -283,6 +315,7 @@ export interface Run {
 export interface LogEntry {
   id: number;
   agentId: string;
+  agentName: string;
   jobId: string | null;
   timestamp: string;
   level: string;
@@ -295,7 +328,9 @@ export interface Alert {
   kind: AlertKind;
   subjectKey: string;
   agentId: string | null;
+  agentName: string | null;
   policyId: string | null;
+  policyName: string | null;
   message: string;
   openedAt: string;
   resolvedAt: string | null;
@@ -377,4 +412,31 @@ export interface CreateRestoreRequest {
   targetDirectory: string | null;
   newDatabase: string | null;
   connectionId: string | null;
+}
+
+export type NotificationEvent = 'Opened' | 'Resolved';
+
+/** One row per (alert transition, recipient): the bell and /notifications feed. */
+export interface OperatorNotification {
+  id: string;
+  kind: AlertKind;
+  event: NotificationEvent;
+  subject: string;
+  body: string;
+  agentId: string | null;
+  policyId: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface UnreadCount {
+  count: number;
+}
+
+/** Per-kind opt-in to e-mail and/or in-app notifications. Absent from the server response never happens:
+ * GET always returns all `ALERT_KINDS`, defaults included. */
+export interface NotificationPreference {
+  kind: AlertKind;
+  email: boolean;
+  inApp: boolean;
 }

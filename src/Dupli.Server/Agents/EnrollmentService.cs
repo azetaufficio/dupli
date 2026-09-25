@@ -75,6 +75,8 @@ public sealed class EnrollmentService(
         agent.SecretHash = SecretHashing.Hash(secret);
         agent.SecretRotatedAt = now;
         agent.EnrolledAt = now;
+        // Enrollment always delivers the current S3 key: nothing to apply after the fact.
+        agent.S3CredentialsAppliedVersion = agent.S3CredentialsVersion;
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation("Agent {AgentId} enrolled from {Hostname}", agent.Id, request.Hostname);
@@ -93,6 +95,7 @@ public sealed class EnrollmentService(
             RepositoryPassword = protector.Unprotect(agent.RepositoryPasswordProtected),
             S3AccessKeyId = agent.S3AccessKeyId,
             S3SecretAccessKey = protector.Unprotect(agent.S3SecretKeyProtected),
+            S3CredentialsVersion = agent.S3CredentialsVersion,
             ResticManifest = manifest,
             PollIntervalSeconds = options.Value.Agents.PollIntervalSeconds,
         };

@@ -1,8 +1,8 @@
 import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
-import { ApiService, params } from '../core/api.service';
+import { Router, RouterLink } from '@angular/router';
+import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import {
@@ -21,11 +21,13 @@ import {
   StorageTarget,
   SystemJobType,
   UpdateAgentSettingsRequest,
+  UpdateAgentStorageCredentialsRequest,
 } from '../core/models';
 import { ToastService } from '../core/toast.service';
 import { Badge } from '../shared/badge';
 import { ConfirmService } from '../shared/confirm';
 import { BytesPipe, DateTimePipe, DurationPipe, RelativeTimePipe } from '../shared/format';
+import { PagedList } from '../shared/paged-list';
 import { SnapshotBrowser } from '../shared/snapshot-browser';
 import { AlertsTable, ItemsTable, JobsTable, LogsTable, RunsTable, lookup } from '../shared/tables';
 
@@ -53,6 +55,12 @@ interface ConnectionForm {
   username: string;
   passwordSecret: string;
   binDirectory: string;
+}
+
+interface CredentialsForm {
+  accessKeyId: string;
+  secretAccessKey: string;
+  skipVerification: boolean;
 }
 
 function emptyConnectionForm(): ConnectionForm {
@@ -131,6 +139,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
             @if (a.status === 'Disabled') {
               <button type="button" class="btn primary" (click)="enable(a)">Re-enable</button>
             }
+            @if ((a.status === 'Pending' || a.status === 'Disabled') && auth.isOwner()) {
+              <button type="button" class="btn danger" (click)="openDeleteForm(a)">
+                Delete agent
+              </button>
+            }
             @if (a.status === 'Active') {
               <button type="button" class="btn" (click)="runSystemJob(a, 'RestoreTest')">
                 Run restore test
@@ -170,6 +183,36 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         </section>
       }
 
+      @if (showDeleteForm()) {
+        <section class="card">
+          <h2>Delete agent</h2>
+          <p class="hint">
+            Removes {{ a.name }} and all its policies, jobs, history, logs, alerts, connections and
+            notifications. The repository in the bucket is <strong>not</strong> deleted from the
+            storage provider.
+          </p>
+          <form (ngSubmit)="deleteAgent(a)" #deleteForm="ngForm">
+            <label class="field">
+              Type "{{ a.name }}" to confirm
+              <input name="deleteConfirmName" [(ngModel)]="deleteConfirmName" required />
+            </label>
+            @if (deleteError()) {
+              <div class="error-box">{{ deleteError() }}</div>
+            }
+            <div class="toolbar">
+              <button
+                type="submit"
+                class="btn danger"
+                [disabled]="deleteConfirmName !== a.name || deletingAgent()"
+              >
+                Delete permanently
+              </button>
+              <button type="button" class="btn" (click)="showDeleteForm.set(false)">Cancel</button>
+            </div>
+          </form>
+        </section>
+      }
+
       <section class="card">
         <dl class="facts">
           <div>
@@ -201,10 +244,6 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
             <dd>{{ a.freeDiskSpace | bytes }}</dd>
           </div>
           <div>
-            <dt>Repository</dt>
-            <dd class="mono">{{ storageLabel() }}/{{ a.storagePrefix }}</dd>
-          </div>
-          <div>
             <dt>Enrolled</dt>
             <dd>{{ a.enrolledAt | datetime }}</dd>
           </div>
@@ -213,6 +252,89 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
             <dd>{{ a.createdAt | datetime }}</dd>
           </div>
         </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Repository</h2>
+          @if (auth.isOwner()) {
+            <button type="button" class="btn small" (click)="openCredentialsForm(a)">
+              Update credentials
+            </button>
+          }
+        </div>
+        <dl class="facts">
+          <div>
+            <dt>Endpoint / bucket</dt>
+            <dd class="mono">{{ storageLabel() }}</dd>
+          </div>
+          <div>
+            <dt>Prefix</dt>
+            <dd class="mono">{{ a.storagePrefix }}</dd>
+          </div>
+          <div>
+            <dt>Access key ID</dt>
+            <dd class="mono">{{ a.s3AccessKeyId }}</dd>
+          </div>
+          <div>
+            <dt>Credentials status</dt>
+            <dd>
+              <app-badge
+                [value]="storageCredentialsStatus()"
+                [text]="storageCredentialsStatusText()"
+              />
+              @if (a.s3CredentialsUpdatedAt) {
+                <span class="muted"> — updated {{ a.s3CredentialsUpdatedAt | datetime }}</span>
+              }
+            </dd>
+          </div>
+        </dl>
+
+        @if (showCredentialsForm()) {
+          <form (ngSubmit)="saveStorageCredentials(a)" #credForm="ngForm">
+            <div class="form-row">
+              <label class="field">
+                Access key ID
+                <input name="credAccessKeyId" [(ngModel)]="credentialsForm.accessKeyId" required />
+              </label>
+              <label class="field">
+                Secret access key
+                <input
+                  type="password"
+                  name="credSecretAccessKey"
+                  [(ngModel)]="credentialsForm.secretAccessKey"
+                  autocomplete="new-password"
+                  required
+                />
+              </label>
+            </div>
+            <label class="check">
+              <input
+                type="checkbox"
+                name="credSkipVerification"
+                [(ngModel)]="credentialsForm.skipVerification"
+              />
+              Skip verification (do not try to list the repository with the new key first)
+            </label>
+            <p class="hint">
+              Revoke the old key with the storage provider only once the status above reads
+              "Applied by the agent".
+            </p>
+            @if (credentialsError()) {
+              <div class="error-box">{{ credentialsError() }}</div>
+            }
+            <div class="toolbar">
+              <button
+                type="submit"
+                class="btn primary"
+                [disabled]="credForm.invalid || savingCredentials()"
+              >
+                Save
+              </button>
+              <button type="button" class="btn" (click)="cancelCredentialsForm()">Cancel</button>
+            </div>
+          </form>
+        }
       </section>
 
       <div class="tabs" role="tablist">
@@ -259,9 +381,19 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
             <div class="card-header">
               <h2>Backup policies</h2>
               @if (auth.canOperate()) {
-                <a class="btn primary small" [routerLink]="['/agents', a.id, 'policies', 'new']"
-                  >New policy</a
-                >
+                <div class="toolbar">
+                  <button
+                    type="button"
+                    class="btn small"
+                    [disabled]="a.status !== 'Active' || runningAll()"
+                    (click)="runAllPolicies(a)"
+                  >
+                    Run all
+                  </button>
+                  <a class="btn primary small" [routerLink]="['/agents', a.id, 'policies', 'new']"
+                    >New policy</a
+                  >
+                </div>
               }
             </div>
             @if ((policies.value() ?? []).length === 0) {
@@ -455,21 +587,41 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         }
         @case ('jobs') {
           <section class="card flush">
-            <app-jobs-table
-              [jobs]="jobs.value() ?? []"
-              [policies]="policyNames()"
-              (cancel)="cancelJob($event)"
-            />
+            <app-jobs-table [jobs]="jobs.items()" (cancel)="cancelJob($event)" />
+            @if (jobs.next()) {
+              <div class="toolbar" style="padding: 1rem">
+                <button
+                  type="button"
+                  class="btn"
+                  [disabled]="jobs.loadingMore()"
+                  (click)="jobs.loadMore()"
+                >
+                  {{ jobs.loadingMore() ? 'Loading…' : 'Load more' }}
+                </button>
+              </div>
+            }
           </section>
         }
         @case ('history') {
           <section class="card flush">
-            <app-runs-table [runs]="runs.value() ?? []" [policies]="policyNames()" />
+            <app-runs-table [runs]="runs.items()" />
+            @if (runs.next()) {
+              <div class="toolbar" style="padding: 1rem">
+                <button
+                  type="button"
+                  class="btn"
+                  [disabled]="runs.loadingMore()"
+                  (click)="runs.loadMore()"
+                >
+                  {{ runs.loadingMore() ? 'Loading…' : 'Load more' }}
+                </button>
+              </div>
+            }
           </section>
         }
         @case ('restore-tests') {
           <section class="card flush">
-            @if ((restoreTests.value() ?? []).length === 0) {
+            @if (restoreTests.items().length === 0) {
               <div class="empty">
                 No restore test yet. They run weekly, or use "Run restore test".
               </div>
@@ -488,7 +640,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                     </tr>
                   </thead>
                   <tbody>
-                    @for (t of restoreTests.value() ?? []; track t.id; let first = $first) {
+                    @for (t of restoreTests.items(); track t.id; let first = $first) {
                       <tr>
                         <td class="nowrap">{{ t.scheduledAt | datetime }}</td>
                         <td>{{ t.trigger }}</td>
@@ -514,6 +666,18 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 </table>
               </div>
             }
+            @if (restoreTests.next()) {
+              <div class="toolbar" style="padding: 1rem">
+                <button
+                  type="button"
+                  class="btn"
+                  [disabled]="restoreTests.loadingMore()"
+                  (click)="restoreTests.loadMore()"
+                >
+                  {{ restoreTests.loadingMore() ? 'Loading…' : 'Load more' }}
+                </button>
+              </div>
+            }
           </section>
         }
         @case ('logs') {
@@ -531,7 +695,19 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 <option value="Error">Error</option>
               </select>
             </div>
-            <app-logs-table [logs]="logs.value() ?? []" />
+            <app-logs-table [logs]="logs.items()" />
+            @if (logs.next()) {
+              <div class="toolbar" style="padding: 1rem">
+                <button
+                  type="button"
+                  class="btn"
+                  [disabled]="logs.loadingMore()"
+                  (click)="logs.loadMore()"
+                >
+                  {{ logs.loadingMore() ? 'Loading…' : 'Load more' }}
+                </button>
+              </div>
+            }
           </section>
         }
         @case ('alerts') {
@@ -650,6 +826,7 @@ export class AgentDetailPage {
 
   protected readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
+  private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
 
@@ -669,28 +846,17 @@ export class AgentDetailPage {
   protected readonly connections = httpResource<PgConnection[]>(
     () => `/api/admin/agents/${this.id()}/connections`,
   );
-  protected readonly jobs = httpResource<Job[]>(() =>
-    this.tab() === 'jobs'
-      ? { url: '/api/admin/jobs', params: { agentId: this.id(), limit: 100 } }
-      : undefined,
+  protected readonly jobs = new PagedList<Job>((before) =>
+    this.api.jobs({ agentId: this.id(), before, limit: 100 }),
   );
-  protected readonly runs = httpResource<Run[]>(() =>
-    this.tab() === 'history'
-      ? { url: '/api/admin/runs', params: { agentId: this.id(), limit: 100 } }
-      : undefined,
+  protected readonly runs = new PagedList<Run>((before) =>
+    this.api.runs({ agentId: this.id(), before, limit: 100 }),
   );
-  protected readonly restoreTests = httpResource<Job[]>(() =>
-    this.tab() === 'restore-tests'
-      ? { url: '/api/admin/jobs', params: { agentId: this.id(), type: 'RestoreTest', limit: 50 } }
-      : undefined,
+  protected readonly restoreTests = new PagedList<Job>((before) =>
+    this.api.jobs({ agentId: this.id(), type: 'RestoreTest', before, limit: 50 }),
   );
-  protected readonly logs = httpResource<LogEntry[]>(() =>
-    this.tab() === 'logs'
-      ? {
-          url: '/api/admin/logs',
-          params: params({ agentId: this.id(), level: this.logLevel(), limit: 300 }),
-        }
-      : undefined,
+  protected readonly logs = new PagedList<LogEntry>((before) =>
+    this.api.logs({ agentId: this.id(), level: this.logLevel() || undefined, before, limit: 300 }),
   );
   protected readonly alerts = httpResource<Alert[]>(() => ({
     url: '/api/admin/alerts',
@@ -707,7 +873,6 @@ export class AgentDetailPage {
       : undefined,
   );
 
-  protected readonly policyNames = computed(() => lookup(this.policies.value()));
   protected readonly connectionNames = computed(() => lookup(this.connections.value()));
   protected readonly openAlertCount = computed(
     () => (this.alerts.value() ?? []).filter((a) => !a.resolvedAt).length,
@@ -740,6 +905,35 @@ export class AgentDetailPage {
   protected readonly savingConnection = signal(false);
   protected readonly connectionError = signal<string | null>(null);
 
+  protected credentialsForm: CredentialsForm = { accessKeyId: '', secretAccessKey: '', skipVerification: false };
+  protected readonly showCredentialsForm = signal(false);
+  protected readonly savingCredentials = signal(false);
+  protected readonly credentialsError = signal<string | null>(null);
+
+  protected readonly showDeleteForm = signal(false);
+  protected readonly deletingAgent = signal(false);
+  protected readonly deleteError = signal<string | null>(null);
+  protected deleteConfirmName = '';
+
+  protected readonly runningAll = signal(false);
+
+  /** "Active" (applied), "Pending" (not yet applied) or "Missed" (agent too old to report it at all). */
+  protected readonly storageCredentialsStatus = computed<'Active' | 'Pending' | 'Missed'>(() => {
+    const a = this.agent.value();
+    if (!a || a.s3CredentialsAppliedVersion === null) return a?.lastHeartbeatAt ? 'Missed' : 'Pending';
+    return a.s3CredentialsAppliedVersion >= a.s3CredentialsVersion ? 'Active' : 'Pending';
+  });
+  protected readonly storageCredentialsStatusText = computed(() => {
+    switch (this.storageCredentialsStatus()) {
+      case 'Active':
+        return 'Applied by the agent';
+      case 'Missed':
+        return 'Agent too old for automatic credential updates';
+      default:
+        return 'Waiting for the agent to apply them';
+    }
+  });
+
   constructor() {
     const timer = setInterval(() => this.refresh(), REFRESH_MS);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
@@ -755,6 +949,28 @@ export class AgentDetailPage {
       };
       this.settingsReady.set(true);
     });
+
+    // Paged lists (jobs/history/restore-tests/logs) fetch on demand, not reactively like httpResource: load
+    // the active tab's first page when it becomes active, the agent changes, or (logs) the level filter does.
+    effect(() => {
+      const activeTab = this.tab();
+      this.id(); // re-run on agent navigation too
+      switch (activeTab) {
+        case 'jobs':
+          this.jobs.reload();
+          break;
+        case 'history':
+          this.runs.reload();
+          break;
+        case 'restore-tests':
+          this.restoreTests.reload();
+          break;
+        case 'logs':
+          this.logLevel();
+          this.logs.reload();
+          break;
+      }
+    });
   }
 
   private refresh(): void {
@@ -769,6 +985,9 @@ export class AgentDetailPage {
         break;
       case 'restore-tests':
         this.restoreTests.reload();
+        break;
+      case 'logs':
+        this.logs.reload();
         break;
       case 'policies':
         this.policies.reload();
@@ -838,8 +1057,46 @@ export class AgentDetailPage {
     });
   }
 
+  protected openDeleteForm(a: Agent): void {
+    this.deleteConfirmName = '';
+    this.deleteError.set(null);
+    this.showDeleteForm.set(true);
+  }
+
+  protected deleteAgent(a: Agent): void {
+    if (this.deleteConfirmName !== a.name) return;
+    this.deletingAgent.set(true);
+    this.deleteError.set(null);
+    this.api.deleteAgent(a.id).subscribe({
+      next: () => {
+        this.toasts.success(`${a.name} deleted`);
+        this.router.navigate(['/agents']);
+      },
+      error: (e) => {
+        this.deleteError.set(problemMessage(e));
+        this.deletingAgent.set(false);
+      },
+    });
+  }
+
   protected runPolicy(p: Policy): void {
     this.api.runPolicy(p.id).subscribe(() => this.toasts.success(`Backup "${p.name}" queued`));
+  }
+
+  protected runAllPolicies(a: Agent): void {
+    this.runningAll.set(true);
+    this.api.runAllPolicies(a.id).subscribe({
+      next: (jobs) => {
+        this.runningAll.set(false);
+        this.toasts.success(
+          jobs.length > 0
+            ? `${jobs.length} backup${jobs.length === 1 ? '' : 's'} queued`
+            : 'Nothing to run: every policy already has a pending job',
+        );
+        this.jobs.reload();
+      },
+      error: () => this.runningAll.set(false),
+    });
   }
 
   protected async cancelJob(job: Job): Promise<void> {
@@ -866,7 +1123,7 @@ export class AgentDetailPage {
   }
 
   protected toggleTest(id: string): void {
-    const tests = this.restoreTests.value() ?? [];
+    const tests = this.restoreTests.items();
     const currentlyOpen = this.isTestExpanded(id, tests[0]?.id === id);
     this.expandedTest.set(currentlyOpen ? null : id);
   }
@@ -955,5 +1212,40 @@ export class AgentDetailPage {
       this.toasts.success('Connection deleted');
       this.connections.reload();
     });
+  }
+
+  protected openCredentialsForm(a: Agent): void {
+    this.credentialsForm = { accessKeyId: a.s3AccessKeyId, secretAccessKey: '', skipVerification: false };
+    this.credentialsError.set(null);
+    this.showCredentialsForm.set(true);
+  }
+
+  protected cancelCredentialsForm(): void {
+    this.showCredentialsForm.set(false);
+    this.credentialsError.set(null);
+  }
+
+  protected saveStorageCredentials(a: Agent): void {
+    const request: UpdateAgentStorageCredentialsRequest = {
+      accessKeyId: this.credentialsForm.accessKeyId.trim(),
+      secretAccessKey: this.credentialsForm.secretAccessKey,
+      skipVerification: this.credentialsForm.skipVerification,
+    };
+    this.savingCredentials.set(true);
+    this.credentialsError.set(null);
+    this.api
+      .updateAgentStorageCredentials(a.id, request, new HttpContext().set(SILENT_ERRORS, true))
+      .subscribe({
+        next: () => {
+          this.toasts.success('Storage credentials updated');
+          this.savingCredentials.set(false);
+          this.showCredentialsForm.set(false);
+          this.agent.reload();
+        },
+        error: (e) => {
+          this.credentialsError.set(problemMessage(e));
+          this.savingCredentials.set(false);
+        },
+      });
   }
 }

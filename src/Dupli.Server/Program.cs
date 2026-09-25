@@ -10,10 +10,12 @@ using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Infrastructure.Notifications;
 using Dupli.Server.Infrastructure.Security;
 using Dupli.Server.Jobs;
+using Dupli.Server.Notifications;
 using Dupli.Server.Restore;
 using Dupli.Server.Tools;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -52,6 +54,7 @@ builder.Services.AddDbContext<DupliDbContext>(o => o
 
 builder.Services.AddDupliDataProtection(builder.Configuration);
 builder.Services.AddDupliRateLimiting(serverOptions.RateLimiting);
+builder.Services.AddDupliHealthChecks();
 
 builder.Services.ConfigureHttpJsonOptions(o => DupliJson.Configure(o.SerializerOptions));
 builder.Services.AddProblemDetails();
@@ -70,6 +73,7 @@ builder.Services.AddSingleton<AgentTokenIssuer>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddScoped<EnrollmentService>();
 builder.Services.AddScoped<JobService>();
+builder.Services.AddScoped<NotificationDispatcher>();
 builder.Services.AddScoped<ReleaseMirror>();
 builder.Services.AddScoped<DesiredVersionResolver>();
 builder.Services.AddMemoryCache();
@@ -108,6 +112,13 @@ await OperatorDirectory.EnsureBootstrapConfiguredAsync(app.Services, serverOptio
 if (!string.IsNullOrWhiteSpace(app.Configuration["Dupli:Auth:EntraId:RequiredRole"]))
     authLogger.LogWarning("Dupli:Auth:EntraId:RequiredRole is no longer used and is ignored: access is managed on the Users page");
 
+var smtpOptions = app.Services.GetRequiredService<IOptions<SmtpOptions>>().Value;
+var office365Options = app.Services.GetRequiredService<IOptions<Office365Options>>().Value;
+if (smtpOptions.To.Any(t => !string.IsNullOrWhiteSpace(t)) || office365Options.To.Any(t => !string.IsNullOrWhiteSpace(t)))
+    authLogger.LogWarning(
+        "Notifications:Smtp:To / Notifications:Office365:To is no longer used and is ignored: " +
+        "recipients are resolved from each operator's notification preferences (Owner and Operator get e-mail by default)");
+
 // Load the key ring now: an unreachable Key Vault or unwritable key directory must fail the startup, not every
 // request that later unprotects a secret or a session cookie.
 app.Services.GetRequiredService<IKeyManager>().GetAllKeys();
@@ -124,6 +135,10 @@ app.UseOperatorLogContext();
 app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains(HealthChecks.ReadyTag),
+}).AllowAnonymous();
 app.MapAgentApi();
 app.MapAdminApi();
 app.MapBff();

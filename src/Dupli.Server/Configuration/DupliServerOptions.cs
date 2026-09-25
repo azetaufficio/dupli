@@ -22,6 +22,14 @@ public sealed class DupliServerOptions
     public ReleaseOptions Releases { get; set; } = new();
     public RateLimitOptions RateLimiting { get; set; } = new();
     public RestoreOptions Restore { get; set; } = new();
+    public NotificationsOptions Notifications { get; set; } = new();
+}
+
+/// <summary>Retention of the per-user notification feed (<c>notification</c> table). Not to be confused with the
+/// top-level <c>Notifications</c> configuration section, which selects and configures the e-mail channel.</summary>
+public sealed class NotificationsOptions
+{
+    public int RetentionDays { get; set; } = 90;
 }
 
 /// <summary>Server-side, read-only access to agent repositories (snapshot list and browse).</summary>
@@ -112,6 +120,9 @@ public sealed class AlertOptions
 
     /// <summary>An enabled policy without a successful run for this long raises BackupTooOld.</summary>
     public TimeSpan BackupMaxAge { get; set; } = TimeSpan.FromHours(48);
+
+    /// <summary>An active agent stuck off the version DesiredVersionResolver wants for this long raises AgentOutdated.</summary>
+    public TimeSpan AgentOutdatedAfter { get; set; } = TimeSpan.FromHours(24);
 }
 
 /// <summary>Automation access to the admin API (scripts, CI). Operators use the web UI login instead.</summary>

@@ -9,6 +9,7 @@ public enum AlertKind
     RepositoryCheckFailed,
     RestoreTestFailed,
     AgentUpdateFailed,
+    AgentOutdated,
 }
 
 /// <summary>
@@ -33,10 +34,14 @@ public sealed class Alert
 
 public sealed record Notification(string Subject, string Body);
 
-/// <summary>Email today; Teams/Telegram/webhook later.</summary>
+/// <summary>Email today; Teams/Telegram/webhook later. Recipients are resolved per user by the notification
+/// dispatcher (preferences), never from channel configuration.</summary>
 public interface INotificationChannel
 {
-    Task SendAsync(Notification notification, CancellationToken cancellationToken);
+    /// <summary>False when the channel has no usable host/credentials configured: sends are not attempted.</summary>
+    bool IsConfigured { get; }
+
+    Task SendAsync(Notification notification, IReadOnlyList<string> recipients, CancellationToken cancellationToken);
 }
 
 public sealed class AgentLog

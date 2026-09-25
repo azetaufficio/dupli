@@ -1,7 +1,7 @@
 import { httpResource } from '@angular/common/http';
-import { Component, computed, signal } from '@angular/core';
-import { Agent, Alert } from '../core/models';
-import { AlertsTable, lookup } from '../shared/tables';
+import { Component, signal } from '@angular/core';
+import { Alert } from '../core/models';
+import { AlertsTable } from '../shared/tables';
 
 @Component({
   selector: 'app-alerts',
@@ -30,20 +30,14 @@ import { AlertsTable, lookup } from '../shared/tables';
       </div>
     </div>
     <section class="card flush">
-      <app-alerts-table
-        [alerts]="alerts.value() ?? []"
-        [agents]="agentNames()"
-        [showAgent]="true"
-      />
+      <app-alerts-table [alerts]="alerts.value() ?? []" [showAgent]="true" />
     </section>
   `,
 })
 export class AlertsPage {
   protected readonly openOnly = signal(true);
-  protected readonly agents = httpResource<Agent[]>(() => '/api/admin/agents');
   protected readonly alerts = httpResource<Alert[]>(() => ({
     url: '/api/admin/alerts',
     params: { open: this.openOnly(), limit: 200 },
   }));
-  protected readonly agentNames = computed(() => lookup(this.agents.value()));
 }

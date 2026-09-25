@@ -55,10 +55,30 @@ public sealed record AgentDto(
     string? LastUpdateOutcome,
     string? LastUpdateError,
     DateTimeOffset? LastUpdateAt,
-    string? ResticUpdateError);
+    string? ResticUpdateError,
+
+    /// <summary>Never the secret access key: only enough to tell the operator which key is configured.</summary>
+    string S3AccessKeyId,
+    int S3CredentialsVersion,
+
+    /// <summary>Version the agent last reported as applied. Behind <see cref="S3CredentialsVersion"/>: it has
+    /// not picked up the latest credentials yet (or is too old to report it at all, in which case this is null).</summary>
+    int? S3CredentialsAppliedVersion,
+    DateTimeOffset? S3CredentialsUpdatedAt);
 
 /// <summary>Channel/pins an operator can change from the UI.</summary>
 public sealed record UpdateAgentSettingsRequest(string Channel, string? PinnedAgentVersion, string? PinnedResticVersion);
+
+/// <summary>Owner only. Verified against the repository unless <see cref="SkipVerification"/> (e.g. the bucket
+/// or the agent VM is unreachable from the server right now).</summary>
+public sealed class UpdateAgentStorageCredentialsRequest
+{
+    public required string AccessKeyId { get; init; }
+    public required string SecretAccessKey { get; init; }
+    public bool SkipVerification { get; init; }
+
+    public override string ToString() => "UpdateAgentStorageCredentialsRequest";
+}
 
 public sealed record EnrollmentTokenDto(string Token, DateTimeOffset ExpiresAt);
 
@@ -139,10 +159,19 @@ public sealed record PgConnectionDto(
 
 public sealed record RunSystemJobRequest(JobType Type);
 
+/// <summary>Keyset page: <see cref="Next"/> is an opaque cursor for the next call's <c>before</c>, or null
+/// when this was the last page.</summary>
+public sealed record PagedDto<T>(IReadOnlyList<T> Items, string? Next);
+
 public sealed record JobDto(
     Guid Id,
     Guid AgentId,
+
+    /// <summary>Name of <see cref="AgentId"/> at the time of the query. The agent always still exists while
+    /// the job row does (cascade delete), so this is never null.</summary>
+    string AgentName,
     Guid? PolicyId,
+    string? PolicyName,
     JobType Type,
     JobTrigger Trigger,
     JobState State,
@@ -159,7 +188,9 @@ public sealed record RunDto(
     Guid Id,
     Guid JobId,
     Guid PolicyId,
+    string? PolicyName,
     Guid AgentId,
+    string AgentName,
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt,
     string Status,
@@ -171,6 +202,7 @@ public sealed record RunDto(
 public sealed record LogDto(
     long Id,
     Guid AgentId,
+    string AgentName,
     Guid? JobId,
     DateTimeOffset Timestamp,
     string Level,
@@ -182,7 +214,9 @@ public sealed record AlertDto(
     AlertKind Kind,
     string SubjectKey,
     Guid? AgentId,
+    string? AgentName,
     Guid? PolicyId,
+    string? PolicyName,
     string Message,
     DateTimeOffset OpenedAt,
     DateTimeOffset? ResolvedAt);

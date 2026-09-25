@@ -8,7 +8,7 @@ public enum AgentStatus
     Disabled,
 }
 
-/// <summary>One Windows VM. Owns exactly one restic repository at <c>{StorageTarget}/{StoragePrefix}</c>.</summary>
+/// <summary>One Host. Owns exactly one restic repository at <c>{StorageTarget}/{StoragePrefix}</c>.</summary>
 public sealed class Agent
 {
     public Guid Id { get; set; }
@@ -61,12 +61,23 @@ public sealed class Agent
     public required string S3SecretKeyProtected { get; set; }
     public required string RepositoryPasswordProtected { get; set; }
 
+    /// <summary>Bumped by an operator's PUT of new S3 credentials; the agent applies them and reports the
+    /// version back in its heartbeat as <see cref="S3CredentialsAppliedVersion"/>.</summary>
+    public int S3CredentialsVersion { get; set; } = 1;
+    public int? S3CredentialsAppliedVersion { get; set; }
+    public DateTimeOffset? S3CredentialsUpdatedAt { get; set; }
+    public string? S3CredentialsUpdatedBy { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? EnrolledAt { get; set; }
 
     public DateTimeOffset? LastRetentionScheduledFor { get; set; }
     public DateTimeOffset? LastCheckScheduledFor { get; set; }
     public DateTimeOffset? LastRestoreTestScheduledFor { get; set; }
+
+    /// <summary>Since when <see cref="Version"/> stopped matching the version DesiredVersionResolver resolves.
+    /// Null when aligned (or not yet compared).</summary>
+    public DateTimeOffset? OutdatedSince { get; set; }
 
     public bool IsOnline(DateTimeOffset now, TimeSpan offlineAfter) =>
         Status == AgentStatus.Active && LastHeartbeatAt is { } hb && now - hb <= offlineAfter;

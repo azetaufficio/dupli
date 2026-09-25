@@ -42,14 +42,14 @@ public sealed class Office365Options
 
     /// <summary>UPN or object id of the mailbox that sends the mail.</summary>
     public string? From { get; set; }
+
+    /// <summary>No longer used: recipients come from each operator's notification preferences. Kept only so a
+    /// leftover setting can be detected and warned about at startup.</summary>
     public List<string> To { get; set; } = [];
     public bool SaveToSentItems { get; set; }
 
-    /// <summary>Non-blank recipients (compose passes an empty <c>__To__0</c> when unset).</summary>
-    public IEnumerable<string> Recipients => To.Where(t => !string.IsNullOrWhiteSpace(t));
-
     public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(From) && Recipients.Any() && Credential switch
+        !string.IsNullOrWhiteSpace(From) && Credential switch
         {
             Office365CredentialKind.ClientSecret => HasApp && !string.IsNullOrWhiteSpace(ClientSecret),
             Office365CredentialKind.Certificate => HasApp && !string.IsNullOrWhiteSpace(CertificatePath),
@@ -95,14 +95,15 @@ public sealed class GraphNotificationChannel(
     // The client's credential caches the token and refreshes it before expiry.
     private readonly Lazy<GraphServiceClient> _client = new(() => clientFactory(options.Value));
 
-    public async Task SendAsync(Notification notification, CancellationToken cancellationToken)
+    public bool IsConfigured => options.Value.IsConfigured;
+
+    public async Task SendAsync(Notification notification, IReadOnlyList<string> recipients, CancellationToken cancellationToken)
     {
         var o = options.Value;
         if (!o.IsConfigured)
-        {
-            logger.LogWarning("Office 365 not configured, notification dropped: {Subject}", notification.Subject);
+            throw new InvalidOperationException("Office 365 is not configured (Notifications:Office365)");
+        if (recipients.Count == 0)
             return;
-        }
 
         var body = new SendMailPostRequestBody
         {
@@ -110,7 +111,7 @@ public sealed class GraphNotificationChannel(
             {
                 Subject = notification.Subject,
                 Body = new ItemBody { ContentType = BodyType.Text, Content = notification.Body },
-                ToRecipients = [.. o.Recipients.Select(to => new Recipient { EmailAddress = new EmailAddress { Address = to } })],
+                ToRecipients = [.. recipients.Select(to => new Recipient { EmailAddress = new EmailAddress { Address = to } })],
             },
             SaveToSentItems = o.SaveToSentItems,
         };

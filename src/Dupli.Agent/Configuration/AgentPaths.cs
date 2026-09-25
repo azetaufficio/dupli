@@ -23,6 +23,9 @@ public sealed class AgentPaths
     /// <summary>Active restic release after a restic update; overrides the manifest received at enrollment.</summary>
     public string ResticStateFile => Path.Combine(Config, "restic.json");
 
+    /// <summary>S3 credentials version currently applied by this agent (see <c>StorageCredentialsState</c>).</summary>
+    public string StorageCredentialsFile => Path.Combine(Config, "storage-credentials.json");
+
     /// <summary>
     /// Stable copy of the executable run by the service as Launcher: <c>%ProgramFiles%\Dupli\Launcher</c> on Windows
     /// (admin-only writable), <c>{root}/launcher</c> elsewhere.

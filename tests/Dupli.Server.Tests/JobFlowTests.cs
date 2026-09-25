@@ -96,7 +96,7 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         var finished = await (await _server.Admin().GetAsync($"/api/admin/jobs/{job.Id}")).ReadAsync<JobDto>();
         Assert.Equal(JobState.Succeeded, finished.State);
 
-        var run = Assert.Single(await (await _server.Admin().GetAsync($"/api/admin/runs?policyId={policy.Id}")).ReadAsync<List<RunDto>>());
+        var run = Assert.Single((await (await _server.Admin().GetAsync($"/api/admin/runs?policyId={policy.Id}")).ReadAsync<PagedDto<RunDto>>()).Items);
         Assert.Equal("Succeeded", run.Status);
         Assert.Equal("abc123", Assert.Single(run.Items).SnapshotId);
 
@@ -178,6 +178,9 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
     [Fact]
     public async Task Interrupted_report_fails_the_job_and_raises_a_single_alert()
     {
+        // Notifications now fan out to operator users (no more global Notifications:*:To): without at least
+        // one, there is nobody to mail and the fake channel would stay empty regardless of the alert.
+        await _server.SeedOperatorUserAsync();
         var agent = await _server.EnrollAsync();
         var policy = await CreatePolicyAsync(agent.AgentId);
         var job = await (await _server.Admin().PostAsync($"/api/admin/policies/{policy.Id}/run", null)).ReadAsync<JobDto>();
@@ -220,6 +223,26 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(["*.tmp"], dir.Excludes);
         Assert.IsType<PolicyPostgresSourceDto>(loaded.Sources.Single(s => s.SourceId == "pg"));
         Assert.NotNull(loaded.NextRunAt);
+    }
+
+    [Fact]
+    public async Task Policy_update_replaces_sources()
+    {
+        var agent = await _server.CreateAgentAsync();
+        var connection = await CreateConnectionAsync(agent.Id);
+        var created = await CreatePolicyAsync(agent.Id, Policy(connection.Id));
+
+        var updated = await (await _server.Admin().PutJsonAsync($"/api/admin/policies/{created.Id}", Policy(connection.Id) with
+        {
+            Name = "nightly-v2",
+            Sources = [new PolicyDirectorySourceDto { SourceId = "photos", Paths = [@"E:\Photos"] }],
+        })).ReadAsync<PolicyDto>();
+
+        Assert.Equal("nightly-v2", updated.Name);
+        var loaded = await (await _server.Admin().GetAsync($"/api/admin/policies/{created.Id}")).ReadAsync<PolicyDto>();
+        var dir = Assert.IsType<PolicyDirectorySourceDto>(Assert.Single(loaded.Sources));
+        Assert.Equal("photos", dir.SourceId);
+        Assert.Equal([@"E:\Photos"], dir.Paths);
     }
 
     [Fact]

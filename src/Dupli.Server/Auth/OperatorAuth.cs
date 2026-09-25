@@ -125,6 +125,11 @@ public static class OperatorAuth
                 .RequireAuthenticatedUser()
                 .RequireAssertion(ctx => IsApiKey(ctx.User) || HasRole(ctx.User, OperatorRole.Owner)
                                          || (breakGlassEnabled && IsBreakGlass(ctx.User))))
+            // Same schemes as UsersPolicy (so the admin key/break-glass can reach the endpoint and be refused
+            // with 403 inside it, not redirected/401'd by authentication); any signed-in operator role qualifies.
+            .AddPolicy(AuthConstants.MePolicy, p => p
+                .AddAuthenticationSchemes(AuthConstants.AdminScheme, CookieScheme, BreakGlassScheme)
+                .RequireAuthenticatedUser())
             // Same schemes, in the same order, as UsersPolicy: the antiforgery token issued here must match there.
             .AddPolicy(AuthConstants.BreakGlassPolicy, p => p
                 .AddAuthenticationSchemes(CookieScheme, BreakGlassScheme)

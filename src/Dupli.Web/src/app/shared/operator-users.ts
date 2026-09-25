@@ -8,6 +8,7 @@ import { ToastService } from '../core/toast.service';
 import { Badge } from './badge';
 import { ConfirmService } from './confirm';
 import { DateTimePipe, RelativeTimePipe } from './format';
+import { NotificationPreferences } from './notification-preferences';
 
 /**
  * Invite, re-role, disable and delete operator users. Shared by the Users page (Owner session) and the
@@ -15,7 +16,7 @@ import { DateTimePipe, RelativeTimePipe } from './format';
  */
 @Component({
   selector: 'app-operator-users',
-  imports: [Badge, DateTimePipe, FormsModule, RelativeTimePipe],
+  imports: [Badge, DateTimePipe, FormsModule, NotificationPreferences, RelativeTimePipe],
   template: `
     <section class="card">
       <h2>Invite</h2>
@@ -97,6 +98,9 @@ import { DateTimePipe, RelativeTimePipe } from './format';
                     {{ u.updatedAt | relative }} · {{ u.updatedBy }}
                   </td>
                   <td class="nowrap">
+                    <button type="button" class="btn small" (click)="toggleNotifications(u.id)">
+                      Notifications
+                    </button>
                     @if (u.disabledAt) {
                       <button type="button" class="btn small" (click)="setDisabled(u, false)">
                         Enable
@@ -113,6 +117,13 @@ import { DateTimePipe, RelativeTimePipe } from './format';
                     }
                   </td>
                 </tr>
+                @if (expandedUserId() === u.id) {
+                  <tr>
+                    <td colspan="6" class="notification-preferences-cell">
+                      <app-notification-preferences [userId]="u.id" />
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -132,6 +143,7 @@ export class OperatorUsers implements OnInit {
   protected readonly users = signal<OperatorUser[]>([]);
   protected readonly saving = signal(false);
   protected readonly error = signal<string | null>(null);
+  protected readonly expandedUserId = signal<string | null>(null);
   protected form: InviteOperatorRequest = { email: '', role: 'Viewer' };
 
   ngOnInit(): void {
@@ -140,6 +152,10 @@ export class OperatorUsers implements OnInit {
 
   reload(): void {
     this.api.users().subscribe((users) => this.users.set(users));
+  }
+
+  protected toggleNotifications(userId: string): void {
+    this.expandedUserId.set(this.expandedUserId() === userId ? null : userId);
   }
 
   protected invite(): void {

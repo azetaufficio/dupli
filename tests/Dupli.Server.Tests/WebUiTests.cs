@@ -194,8 +194,8 @@ public sealed class WebUiTests(PostgresFixture postgres) : IAsyncLifetime
             ],
         });
 
-        var tests = await (await admin.GetAsync($"/api/admin/jobs?agentId={agent.AgentId}&type=RestoreTest")).ReadAsync<List<JobDto>>();
-        var stored = Assert.Single(tests);
+        var tests = await (await admin.GetAsync($"/api/admin/jobs?agentId={agent.AgentId}&type=RestoreTest")).ReadAsync<PagedDto<JobDto>>();
+        var stored = Assert.Single(tests.Items);
         Assert.Equal(JobState.Failed, stored.State);
         Assert.Equal(2, stored.Items.Count);
 

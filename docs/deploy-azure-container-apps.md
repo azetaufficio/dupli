@@ -191,10 +191,12 @@ Il passo 5 (facoltativo: *Assignment required*) si fa dal portale.
 
 Scegli un canale e prepara le variabili:
 
-- **Office 365 (Microsoft Graph):** crea una **seconda** app registration (es. `Dupli Mailer`, separata da quella di login). Dalle il permesso *Application* `Mail.Send` con admin consent, e crea un client secret. Limitala alla sola casella mittente con una *application access policy* di Exchange Online (o RBAC for Applications): senza limite può inviare come qualunque utente. Variabili: `Notifications__Channel=Office365`, più `Notifications__Office365__TenantId`, `ClientId`, `ClientSecret`, `From` e `To__0`.
-- **SMTP:** `Notifications__Channel=Smtp`, più `Notifications__Smtp__Host`, `Port`, `Security`, `Username`, `Password`, `From` e `To__0`.
+- **Office 365 (Microsoft Graph):** crea una **seconda** app registration (es. `Dupli Mailer`, separata da quella di login). Dalle il permesso *Application* `Mail.Send` con admin consent, e crea un client secret. Limitala alla sola casella mittente con una *application access policy* di Exchange Online (o RBAC for Applications): senza limite può inviare come qualunque utente. Variabili: `Notifications__Channel=Office365`, più `Notifications__Office365__TenantId`, `ClientId`, `ClientSecret` e `From`.
+- **SMTP:** `Notifications__Channel=Smtp`, più `Notifications__Smtp__Host`, `Port`, `Security`, `Username`, `Password` e `From`.
 
 Il template del punto 8 usa Office 365. Per SMTP sostituisci il blocco env relativo.
+
+Chi riceve le mail (e/o le notifiche in-app) non si configura più qui: ogni operatore lo decide per sé sotto il menu utente ("Preferenze di notifica"), e un Owner può farlo per un altro utente dalla pagina Users. Di default l'in-app è attivo per tutti e la mail è attiva per Owner e Operator (spenta per Viewer). **Nota di migrazione**: chi oggi riceve le mail agli indirizzi in `Notifications:*:To` smetterà di riceverle se non è un utente operatore Owner/Operator con mail attiva: prima del deploy, verifica quegli indirizzi ed eventualmente invitali dalla pagina Users.
 
 ---
 
@@ -205,7 +207,7 @@ Genera la chiave di firma dei token agent. È opzionale, ma se la fissi un riavv
 SIGNING_KEY=$(openssl rand -base64 32)
 export LOC ENV_ID IMAGE FQDN KV IDENTITY_ID IDENTITY_CLIENT_ID DB_CONNECTION SIGNING_KEY ENTRA_TENANT_ID ENTRA_CLIENT_ID ENTRA_CLIENT_SECRET
 export DUPLI_BOOTSTRAP_OWNER_EMAIL=tu@tuodominio.it   # primo Owner, vedi punto 6.5
-export O365_TENANT_ID=... O365_CLIENT_ID=... O365_CLIENT_SECRET=... O365_FROM=dupli@tuodominio.it O365_TO=ops@tuodominio.it
+export O365_TENANT_ID=... O365_CLIENT_ID=... O365_CLIENT_SECRET=... O365_FROM=dupli@tuodominio.it
 ```
 
 Il template è nel repo: `deploy/azure/containerapp.template.yaml`, riportato qui sotto. Non contiene segreti: i valori arrivano da `envsubst`.
@@ -277,8 +279,6 @@ properties:
             secretRef: o365-client-secret
           - name: Notifications__Office365__From
             value: ${O365_FROM}
-          - name: Notifications__Office365__To__0
-            value: ${O365_TO}
         probes:
           - type: Liveness
             httpGet:
@@ -288,7 +288,7 @@ properties:
             periodSeconds: 30
           - type: Readiness
             httpGet:
-              path: /health
+              path: /health/ready
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -296,6 +296,14 @@ properties:
       minReplicas: 1
       maxReplicas: 1
 ```
+
+`/health` (liveness) non tocca mai il database: risponde anche con PostgreSQL irraggiungibile, altrimenti ACA riavvierebbe il container in loop invece di aspettare. `/health/ready` (readiness) esegue un `SELECT 1` con timeout 5s: se il DB non risponde, ACA smette di instradare traffico su quella revision finché non torna disponibile.
+
+**App già in produzione con la vecchia probe su `/health`:** applica solo l'aggiornamento della readiness probe, senza toccare segreti o immagine:
+```bash
+az containerapp update -g $RG -n $APP --yaml <(envsubst < deploy/azure/containerapp.template.yaml)
+```
+oppure modifica la revisione attiva da Portale/`az containerapp revision`.
 
 Il template non imposta `Dupli__Admin__ApiKey`, quindi la chiave admin resta disattivata: in produzione si usa solo il login Entra. Se ti serve per degli script, aggiungila come secret.
 
@@ -310,7 +318,8 @@ rm /tmp/dupli-app.yaml
 
 ### Verifica del deploy
 ```bash
-curl -s https://$FQDN/health                    # {"status":"ok"}
+curl -s https://$FQDN/health                    # {"status":"ok"} (liveness, non tocca il DB)
+curl -s -o /dev/null -w '%{http_code}\n' https://$FQDN/health/ready  # 200 (readiness, SELECT 1)
 az containerapp logs show -g $RG -n $APP --follow --tail 100
 ```
 Nei log del primo avvio devi vedere:

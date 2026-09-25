@@ -17,29 +17,30 @@ public sealed class SmtpOptions
     public string? Username { get; set; }
     public string? Password { get; set; }
     public string From { get; set; } = "dupli@localhost";
+
+    /// <summary>No longer used: recipients come from each operator's notification preferences. Kept only so a
+    /// leftover setting can be detected and warned about at startup.</summary>
     public List<string> To { get; set; } = [];
 
-    /// <summary>Non-blank recipients (compose passes an empty <c>Smtp__To__0</c> when unset).</summary>
-    public IEnumerable<string> Recipients => To.Where(t => !string.IsNullOrWhiteSpace(t));
-
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(Host) && Recipients.Any();
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(Host) && !string.IsNullOrWhiteSpace(From);
 }
 
 public sealed class SmtpNotificationChannel(IOptions<SmtpOptions> options, ILogger<SmtpNotificationChannel> logger)
     : INotificationChannel
 {
-    public async Task SendAsync(Notification notification, CancellationToken cancellationToken)
+    public bool IsConfigured => options.Value.IsConfigured;
+
+    public async Task SendAsync(Notification notification, IReadOnlyList<string> recipients, CancellationToken cancellationToken)
     {
         var o = options.Value;
         if (!o.IsConfigured)
-        {
-            logger.LogWarning("SMTP not configured, notification dropped: {Subject}", notification.Subject);
+            throw new InvalidOperationException("SMTP is not configured (Notifications:Smtp)");
+        if (recipients.Count == 0)
             return;
-        }
 
         var message = new MimeMessage();
         message.From.Add(MailboxAddress.Parse(o.From));
-        foreach (var to in o.Recipients)
+        foreach (var to in recipients)
             message.To.Add(MailboxAddress.Parse(to));
         message.Subject = notification.Subject;
         message.Body = new TextPart("plain") { Text = notification.Body };

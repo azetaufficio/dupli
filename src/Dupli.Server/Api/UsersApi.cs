@@ -25,7 +25,24 @@ public static class UsersApi
         users.MapPost("/{id:guid}/enable", (Guid id, ClaimsPrincipal actor, DupliDbContext db, OperatorDirectory directory, TimeProvider time, CancellationToken ct) =>
             SetDisabledAsync(id, disabled: false, actor, db, directory, time, ct));
         users.MapDelete("/{id:guid}", DeleteAsync);
+
+        users.MapGet("/{id:guid}/notification-preferences", GetPreferencesAsync);
+        users.MapPut("/{id:guid}/notification-preferences", SetPreferencesAsync);
     }
+
+    private static async Task<IEnumerable<NotificationPreferenceDto>> GetPreferencesAsync(Guid id, DupliDbContext db, CancellationToken ct) =>
+        await NotificationsApi.GetPreferencesAsync(await LoadUserAsync(id, db, ct), db, ct);
+
+    private static async Task<IEnumerable<NotificationPreferenceDto>> SetPreferencesAsync(
+        Guid id, List<NotificationPreferenceDto> request, DupliDbContext db, CancellationToken ct)
+    {
+        var user = await LoadUserAsync(id, db, ct);
+        await NotificationsApi.SetPreferencesAsync(id, request, db, ct);
+        return await NotificationsApi.GetPreferencesAsync(user, db, ct);
+    }
+
+    private static async Task<OperatorUser> LoadUserAsync(Guid id, DupliDbContext db, CancellationToken ct) =>
+        await db.OperatorUsers.AsNoTracking().SingleOrDefaultAsync(u => u.Id == id, ct) ?? throw ApiException.NotFound("User");
 
     private static async Task<IEnumerable<OperatorUserDto>> ListAsync(DupliDbContext db, CancellationToken ct) =>
         (await db.OperatorUsers.AsNoTracking().OrderBy(u => u.Email).ToListAsync(ct)).Select(ToDto);

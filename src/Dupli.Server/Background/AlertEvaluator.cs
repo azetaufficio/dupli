@@ -5,6 +5,7 @@ using Dupli.Server.Domain.Agents;
 using Dupli.Server.Domain.Jobs;
 using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Infrastructure.Database;
+using Dupli.Server.Notifications;
 using Dupli.Server.Tools;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -13,12 +14,12 @@ namespace Dupli.Server.Background;
 
 /// <summary>
 /// Recomputes every alert condition each tick (offline detection included), opens alerts for new
-/// conditions, resolves the ones that cleared, and notifies once per transition. Unsent notifications
-/// are retried on the next tick.
+/// conditions, resolves the ones that cleared, and hands transitions to <see cref="NotificationDispatcher"/>
+/// once per transition. Unsent notifications are retried on the next tick.
 /// </summary>
 public sealed class AlertEvaluator(
     DupliDbContext db,
-    INotificationChannel channel,
+    NotificationDispatcher notifications,
     IOptions<DupliServerOptions> options,
     DesiredVersionResolver desiredVersions,
     TimeProvider time,
@@ -56,37 +57,7 @@ public sealed class AlertEvaluator(
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        await NotifyAsync(now, cancellationToken);
-    }
-
-    private async Task NotifyAsync(DateTimeOffset now, CancellationToken ct)
-    {
-        var toNotify = await db.Alerts
-            .Where(a => a.NotifiedAt == null || (a.ResolvedAt != null && a.ResolvedNotifiedAt == null))
-            .OrderBy(a => a.OpenedAt)
-            .ToListAsync(ct);
-
-        foreach (var alert in toNotify)
-        {
-            var resolved = alert.ResolvedAt is not null;
-            try
-            {
-                // An alert that opened and cleared before its first notification is only reported once, as resolved.
-                await channel.SendAsync(resolved
-                    ? new Notification($"[Dupli] RESOLVED {alert.Kind}: {alert.SubjectKey}", $"{alert.Message}\n\nResolved at {alert.ResolvedAt:u}.")
-                    : new Notification($"[Dupli] {alert.Kind}: {alert.SubjectKey}", $"{alert.Message}\n\nOpened at {alert.OpenedAt:u}."), ct);
-                alert.NotifiedAt ??= now;
-                if (resolved)
-                    alert.ResolvedNotifiedAt = now;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogError(ex, "Notification for alert {AlertId} failed; retrying next tick", alert.Id);
-                break;
-            }
-        }
-
-        await db.SaveChangesAsync(ct);
+        await notifications.RunOnceAsync(now, cancellationToken);
     }
 
     private async Task<List<Condition>> EvaluateAsync(DateTimeOffset now, CancellationToken ct)
@@ -106,10 +77,19 @@ public sealed class AlertEvaluator(
             // Rolled back to the version it was on before, still on the version the server wants: the Launcher
             // gave up and needs an operator (a new pin/channel, or a fixed release).
             var desiredAgentVersion = desiredByAgent[agent.Id].Agent?.Version;
-            if (agent.LastUpdateOutcome == nameof(UpdateOutcome.RolledBack) && desiredAgentVersion is not null
-                && agent.LastUpdateVersion == desiredAgentVersion && agent.Version != desiredAgentVersion)
+            var updateFailed = agent.LastUpdateOutcome == nameof(UpdateOutcome.RolledBack) && desiredAgentVersion is not null
+                && agent.LastUpdateVersion == desiredAgentVersion && agent.Version != desiredAgentVersion;
+            if (updateFailed)
                 conditions.Add(new Condition(AlertKind.AgentUpdateFailed, $"agent:{agent.Id}", agent.Id, null,
                     $"Agent {agent.Name} failed to update to {agent.LastUpdateVersion} and was rolled back to {agent.Version}: {agent.LastUpdateError}"));
+
+            // AgentUpdateFailed above already explains a stuck version; do not also raise AgentOutdated for it.
+            if (!updateFailed && agent.OutdatedSince is { } outdatedSince && now - outdatedSince > o.Alerts.AgentOutdatedAfter)
+            {
+                var repair = agent.LauncherManaged ? "" : " It is not Launcher-managed, so it cannot update itself: run 'install' again to fix that.";
+                conditions.Add(new Condition(AlertKind.AgentOutdated, $"agent:{agent.Id}", agent.Id, null,
+                    $"Agent {agent.Name} has been running {agent.Version ?? "an unknown version"} instead of {desiredAgentVersion ?? "the desired version"} since {outdatedSince:u}.{repair}"));
+            }
 
             var lastCheck = await LatestFinishedAsync(agent.Id, null, JobType.RepositoryCheck, ct);
             if (lastCheck is { State: JobState.Failed or JobState.TimedOut })

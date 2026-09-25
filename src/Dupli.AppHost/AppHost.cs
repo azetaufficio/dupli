@@ -50,7 +50,9 @@ var server = builder.AddProject<Projects.Dupli_Server>("server", launchProfileNa
     .WithEnvironment("Notifications__Smtp__Port", smtp.Property(EndpointProperty.Port))
     .WithEnvironment("Notifications__Smtp__Security", "None")
     .WithEnvironment("Notifications__Smtp__From", "dupli@dupli.local")
-    .WithEnvironment("Notifications__Smtp__To__0", "ops@dupli.local")
+    // Who receives mail is per operator (notification preferences), not a fixed recipient: the bootstrap
+    // owner (Parameters:bootstrap-owner-email) gets e-mail by default and Mailpit catches all outgoing SMTP
+    // regardless of address, so no separate seed recipient is needed here.
     .WithHttpHealthCheck("/health")
     .WaitFor(mailpit);
 

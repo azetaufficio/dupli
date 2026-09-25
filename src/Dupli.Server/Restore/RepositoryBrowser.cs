@@ -72,6 +72,60 @@ public sealed class RepositoryBrowser : IResticBinaryProvider
     public Task<IReadOnlyList<SnapshotNode>> ListDirectoryAsync(Guid agentId, string snapshotId, string directory, CancellationToken ct) =>
         RunAsync(agentId, (repository, token) => _engine.ListDirectoryAsync(repository, snapshotId, directory, token), ct);
 
+    /// <summary>Clears the cached snapshot list of an agent: called after its repository credentials change.</summary>
+    public void Invalidate(Guid agentId) => _cache.Remove(("snapshots", agentId));
+
+    /// <summary>Removes the agent's restic cache directory and its cached snapshot list, called when the agent
+    /// itself is deleted. The repository in the bucket is untouched.</summary>
+    public void DeleteCache(Guid agentId)
+    {
+        Invalidate(agentId);
+        var directory = CacheDirectory(agentId);
+        try
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "Could not delete the restic cache directory of agent {AgentId}", agentId);
+        }
+    }
+
+    /// <summary>
+    /// Read-only snapshot listing with candidate S3 credentials, used to validate a storage credentials update
+    /// before it is saved. Throws <see cref="ApiException"/> (422, restic's own error) on failure.
+    /// </summary>
+    public async Task VerifyCredentialsAsync(Agent agent, string accessKeyId, string secretAccessKey, CancellationToken ct)
+    {
+        await using var scope = _scopes.CreateAsyncScope();
+        var protector = scope.ServiceProvider.GetRequiredService<SecretProtector>();
+        var repository = BuildRepository(agent, accessKeyId, secretAccessKey,
+            protector.Unprotect(agent.RepositoryPasswordProtected), CacheDirectory(agent.Id), ResolveEndpoint(agent.StorageTarget!.Endpoint));
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(Options.ListingTimeout);
+        await _concurrency.WaitAsync(timeout.Token);
+        try
+        {
+            await _engine.ListSnapshotsAsync(repository, [], timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw ApiException.UnprocessableEntity(
+                $"Repository {repository} did not answer within {Options.ListingTimeout.TotalSeconds:0}s");
+        }
+        catch (BackupException ex)
+        {
+            _logger.LogWarning(ex, "Storage credentials verification for agent {AgentId} failed", agent.Id);
+            throw ApiException.UnprocessableEntity($"Could not list the repository with these credentials: {ex.Message}");
+        }
+        finally
+        {
+            _concurrency.Release();
+        }
+    }
+
     /// <summary>The snapshot (by full or short id), or null when the repository has none with that id.</summary>
     public async Task<SnapshotInfo?> FindSnapshotAsync(Guid agentId, string snapshotId, CancellationToken ct)
     {
@@ -116,27 +170,37 @@ public sealed class RepositoryBrowser : IResticBinaryProvider
         var protector = scope.ServiceProvider.GetRequiredService<SecretProtector>();
         var agent = await db.Agents.AsNoTracking().Include(a => a.StorageTarget)
             .SingleOrDefaultAsync(a => a.Id == agentId, ct) ?? throw ApiException.NotFound("Agent");
-        var endpoint = agent.StorageTarget!.Endpoint.TrimEnd('/');
-        var overridden = Options.EndpointOverrides
-            .FirstOrDefault(o => string.Equals(o.From.TrimEnd('/'), endpoint, StringComparison.OrdinalIgnoreCase))?.To;
-        return BuildRepository(agent, protector, CacheDirectory(agentId), overridden);
+        return BuildRepository(agent, protector, CacheDirectory(agentId), ResolveEndpoint(agent.StorageTarget!.Endpoint));
     }
 
-    internal static RepositoryTarget BuildRepository(Agent agent, SecretProtector protector, string cacheDirectory, string? endpoint = null)
+    /// <summary>Server-side override for an S3 endpoint agents reach directly (a private endpoint, or a
+    /// container network name in the dev stack). Null when the agent's own endpoint also works for the server.</summary>
+    private string? ResolveEndpoint(string endpoint) =>
+        Options.EndpointOverrides
+            .FirstOrDefault(o => string.Equals(o.From.TrimEnd('/'), endpoint.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))?.To;
+
+    /// <summary>The agent's own (escrowed) credentials.</summary>
+    internal static RepositoryTarget BuildRepository(Agent agent, SecretProtector protector, string cacheDirectory, string? endpoint = null) =>
+        BuildRepository(agent, agent.S3AccessKeyId, protector.Unprotect(agent.S3SecretKeyProtected),
+            protector.Unprotect(agent.RepositoryPasswordProtected), cacheDirectory, endpoint);
+
+    /// <summary>Explicit credentials, e.g. a candidate S3 key not yet saved (<see cref="VerifyCredentialsAsync"/>).</summary>
+    internal static RepositoryTarget BuildRepository(
+        Agent agent, string accessKeyId, string secretAccessKey, string repositoryPassword, string cacheDirectory, string? endpoint = null)
     {
         var storage = agent.StorageTarget ?? throw new InvalidOperationException("Storage target not loaded");
         var path = string.IsNullOrWhiteSpace(agent.StoragePrefix) ? storage.Bucket : $"{storage.Bucket}/{agent.StoragePrefix.Trim('/')}";
         var env = new Dictionary<string, string>
         {
-            ["AWS_ACCESS_KEY_ID"] = agent.S3AccessKeyId,
-            ["AWS_SECRET_ACCESS_KEY"] = protector.Unprotect(agent.S3SecretKeyProtected),
+            ["AWS_ACCESS_KEY_ID"] = accessKeyId,
+            ["AWS_SECRET_ACCESS_KEY"] = secretAccessKey,
             ["RESTIC_CACHE_DIR"] = cacheDirectory,
         };
         if (!string.IsNullOrWhiteSpace(storage.Region))
             env["AWS_DEFAULT_REGION"] = storage.Region;
         return new RepositoryTarget(
             $"s3:{(endpoint ?? storage.Endpoint).TrimEnd('/')}/{path}",
-            protector.Unprotect(agent.RepositoryPasswordProtected),
+            repositoryPassword,
             env,
             readOnly: true);
     }

@@ -132,7 +132,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
 
         var finished = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{job.Id}"));
         Assert.Equal(JobState.Succeeded, finished.State);
-        var run = Assert.Single(await Read<List<RunDto>>(await admin.GetAsync($"/api/admin/runs?policyId={policy.Id}")));
+        var run = Assert.Single((await Read<PagedDto<RunDto>>(await admin.GetAsync($"/api/admin/runs?policyId={policy.Id}"))).Items);
         var snapshotId = Assert.Single(run.Items).SnapshotId;
 
         var snapshots = await runtime.Engine.ListSnapshotsAsync(runtime.Repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None);
@@ -304,6 +304,59 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         Assert.Equal("top", await File.ReadAllTextAsync(Path.Combine(data, "a.txt")));
     }
 
+    /// <summary>
+    /// Full "desired state via heartbeat" round trip for S3 credentials: a wrong key is rejected (422, a real
+    /// read-only restic listing against RustFS), the right key is accepted and versioned, the agent picks it
+    /// up on its next heartbeat (fetch + local state file), and the backup right after succeeds.
+    /// Note: RustFS in this harness has a single access key, so "the new key" is the same value as the old one;
+    /// what this proves is the protocol end to end and that a job started after the rotation re-reads the
+    /// current secrets (JobExecutor no longer captures a fixed RepositoryTarget at process startup).
+    /// </summary>
+    [Fact]
+    public async Task Owner_rotates_the_agents_S3_key_and_the_next_backup_succeeds()
+    {
+        var admin = _server.CreateClient();
+        admin.DefaultRequestHeaders.Add(AuthConstants.AdminKeyHeader, AdminKey);
+        var (agentId, paths, secrets, config) = await EnrollAgentAsync(admin, "vm-rotate");
+
+        var data = Directory.CreateDirectory(Path.Combine(_root, "rotate-data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(data, "a.txt"), "hello");
+        var policy = await Read<PolicyDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/policies", new PolicyRequest
+        {
+            Name = "rotate", Cron = "0 2 * * *",
+            Sources = [new PolicyDirectorySourceDto { SourceId = "data", Paths = [data] }],
+        }, DupliJson.Options));
+
+        // Verification lists an existing repository: back up once first, with the original key.
+        var (loop, _, _) = CreateAgent(paths, config, secrets);
+        var firstJob = await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
+        await loop.RunOnceAsync(CancellationToken.None);
+        Assert.Equal(JobState.Succeeded, (await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{firstJob.Id}"))).State);
+
+        var rejected = await admin.PutAsJsonAsync($"/api/admin/agents/{agentId}/storage-credentials",
+            new UpdateAgentStorageCredentialsRequest { AccessKeyId = S3AccessKey, SecretAccessKey = "wrong-secret" }, DupliJson.Options);
+        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
+        Assert.Equal(1, (await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"))).S3CredentialsVersion);
+
+        var accepted = await admin.PutAsJsonAsync($"/api/admin/agents/{agentId}/storage-credentials",
+            new UpdateAgentStorageCredentialsRequest { AccessKeyId = S3AccessKey, SecretAccessKey = S3SecretKey }, DupliJson.Options);
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, accepted.StatusCode);
+        var afterUpdate = await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"));
+        Assert.Equal(2, afterUpdate.S3CredentialsVersion);
+        Assert.Equal(1, afterUpdate.S3CredentialsAppliedVersion); // not yet reported by a heartbeat
+
+        await loop.RunOnceAsync(CancellationToken.None); // heartbeat: fetches version 2 and applies it locally
+        await loop.RunOnceAsync(CancellationToken.None); // next heartbeat: reports version 2 as applied
+
+        var applied = await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"));
+        Assert.Equal(2, applied.S3CredentialsAppliedVersion);
+
+        var job = await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
+        await loop.RunOnceAsync(CancellationToken.None);
+        var finished = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{job.Id}"));
+        Assert.Equal(JobState.Succeeded, finished.State);
+    }
+
     private async Task<(Guid AgentId, AgentPaths Paths, MemorySecretStore Secrets, AgentConfig Config)> EnrollAgentAsync(HttpClient admin, string name)
     {
         var storage = await Read<StorageTargetDto>(await admin.PostAsJsonAsync("/api/admin/storage-targets",
@@ -337,7 +390,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var ledger = new JobLedger(paths.LedgerFile);
         var executor = new JobExecutor(runtime, ledger, TimeProvider.System, _loggers.CreateLogger<JobExecutor>());
         var updates = withUpdates ? CreateUpdates(paths, runtime) : null;
-        var loop = new ServerAgentLoop(CreateClient(config, secrets), ledger, executor, config, paths, TimeProvider.System,
+        var loop = new ServerAgentLoop(CreateClient(config, secrets), ledger, executor, config, paths, secrets, TimeProvider.System,
             _restarter, _loggers.CreateLogger<ServerAgentLoop>(), updates);
         return (loop, runtime, ledger);
     }

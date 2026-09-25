@@ -6,6 +6,8 @@ using Dupli.Contracts.Agents;
 using Dupli.Server.Api;
 using Dupli.Server.Auth;
 using Dupli.Server.Domain.Monitoring;
+using Dupli.Server.Domain.Operators;
+using Dupli.Server.Infrastructure.Database;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -24,7 +26,12 @@ namespace Dupli.Server.Tests.Infrastructure;
 /// <summary>One PostgreSQL container per test run; every <see cref="DupliTestServer"/> gets its own database.</summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine").Build();
+    // The default 100 is not enough for a full run of this test project: each test gets its own database (and
+    // often its own Npgsql pool), and the suite now has well over 100 tests. Raise the server-side limit instead
+    // of trying to keep the client-side pools perfectly in lockstep with test disposal.
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:18-alpine")
+        .WithCommand("-c", "max_connections=300")
+        .Build();
 
     public string ConnectionString(string database) =>
         new Npgsql.NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = database }.ConnectionString;
@@ -44,8 +51,15 @@ public sealed class CapturingNotificationChannel : INotificationChannel
 {
     public List<Notification> Sent { get; } = [];
 
-    public Task SendAsync(Notification notification, CancellationToken cancellationToken)
+    public bool IsConfigured { get; set; } = true;
+
+    /// <summary>Set by tests exercising the dispatcher's mail retry/Failed path.</summary>
+    public bool ThrowOnSend { get; set; }
+
+    public Task SendAsync(Notification notification, IReadOnlyList<string> recipients, CancellationToken cancellationToken)
     {
+        if (ThrowOnSend)
+            throw new InvalidOperationException("simulated channel failure");
         lock (Sent)
             Sent.Add(notification);
         return Task.CompletedTask;
@@ -239,6 +253,33 @@ public static class DupliTestServerExtensions
             S3SecretAccessKey = $"SK-{name}",
             RepositoryPassword = $"repo-password-{name}",
         })).ReadAsync<AgentDto>();
+    }
+
+    /// <summary>
+    /// Inserts an active, already-bound operator user directly (bypasses sign-in): notification fan-out and
+    /// preferences tests need a recipient without exercising the whole Entra ID flow.
+    /// </summary>
+    public static async Task<OperatorUserDto> SeedOperatorUserAsync(
+        this DupliTestServer server, string email = "owner@dupli.test", OperatorRole role = OperatorRole.Owner)
+    {
+        await using var scope = server.Services.CreateAsyncScope();
+        var db = server.Scoped<DupliDbContext>(scope);
+        var now = server.Time.GetUtcNow();
+        var user = new OperatorUser
+        {
+            Id = Guid.NewGuid(),
+            Email = email,
+            Role = role,
+            TenantId = "seed-tenant",
+            ObjectId = Guid.NewGuid().ToString(),
+            CreatedAt = now,
+            CreatedBy = "test",
+            UpdatedAt = now,
+            UpdatedBy = "test",
+        };
+        db.OperatorUsers.Add(user);
+        await db.SaveChangesAsync();
+        return new OperatorUserDto(user.Id, user.Email, user.Role, user.DisplayName, true, null, null, user.CreatedAt, user.CreatedBy, user.UpdatedAt, user.UpdatedBy);
     }
 
     public static async Task<EnrolledAgent> EnrollAsync(this DupliTestServer server, string name = "vm-01", string machineId = "machine-1")

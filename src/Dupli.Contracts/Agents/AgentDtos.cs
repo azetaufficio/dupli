@@ -30,6 +30,9 @@ public sealed class RegisterAgentResponse
     public required string RepositoryPassword { get; init; }
     public required string S3AccessKeyId { get; init; }
     public required string S3SecretAccessKey { get; init; }
+
+    /// <summary>Version of the S3 credentials delivered above; the agent records it as already applied.</summary>
+    public int S3CredentialsVersion { get; init; } = 1;
     public required ToolManifestDto ResticManifest { get; init; }
     public int PollIntervalSeconds { get; init; } = 30;
 
@@ -66,6 +69,16 @@ public sealed class RotateSecretResponse
     public override string ToString() => "RotateSecretResponse";
 }
 
+/// <summary>Answer to <c>GET /api/agents/storage-credentials</c>: the S3 key currently desired for this agent.</summary>
+public sealed class StorageCredentialsResponse
+{
+    public required int Version { get; init; }
+    public required string AccessKeyId { get; init; }
+    public required string SecretAccessKey { get; init; }
+
+    public override string ToString() => $"StorageCredentialsResponse(v{Version})";
+}
+
 public sealed record HeartbeatRequest
 {
     public required string Hostname { get; init; }
@@ -87,6 +100,10 @@ public sealed record HeartbeatRequest
 
     /// <summary>Why the desired restic version could not be activated (null when it is active or not attempted).</summary>
     public string? ResticUpdateError { get; init; }
+
+    /// <summary>S3 credentials version the agent currently has applied. Null: an agent older than this feature,
+    /// which leaves <c>Agent.S3CredentialsAppliedVersion</c> untouched.</summary>
+    public int? StorageCredentialsVersion { get; init; }
 }
 
 public sealed record HeartbeatResponse
@@ -99,6 +116,10 @@ public sealed record HeartbeatResponse
 
     /// <summary>restic release the server wants this agent to use.</summary>
     public ToolManifestDto? DesiredRestic { get; init; }
+
+    /// <summary>S3 credentials version the server wants this agent to use. Greater than what the agent has
+    /// applied: it must call <c>GET /api/agents/storage-credentials</c> and update its local secrets.</summary>
+    public int StorageCredentialsVersion { get; init; } = 1;
 }
 
 public enum UpdateOutcome

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Cronos;
@@ -15,6 +16,7 @@ using Dupli.Server.Domain.Tools;
 using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Infrastructure.Security;
 using Dupli.Server.Jobs;
+using Dupli.Server.Restore;
 using Dupli.Server.Tools;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -66,7 +68,10 @@ public static class AdminApi
         operate.MapPost("/agents/{id:guid}/disable", (Guid id, DupliDbContext db, CancellationToken ct) => SetStatusAsync(id, AgentStatus.Disabled, db, ct));
         operate.MapPost("/agents/{id:guid}/enable", EnableAsync);
         operate.MapPost("/agents/{id:guid}/jobs", RunSystemJobAsync);
+        operate.MapPost("/agents/{id:guid}/policies/run", RunAllPoliciesAsync);
         operate.MapPut("/agents/{id:guid}/update-settings", UpdateAgentSettingsAsync);
+        own.MapPut("/agents/{id:guid}/storage-credentials", UpdateAgentStorageCredentialsAsync);
+        own.MapDelete("/agents/{id:guid}", DeleteAgentAsync);
 
         admin.MapGet("/policies", async (DupliDbContext db, CancellationToken ct) =>
             (await db.Policies.AsNoTracking().Include(p => p.Sources).OrderBy(p => p.Name).ToListAsync(ct)).Select(ToDto));
@@ -82,9 +87,9 @@ public static class AdminApi
 
         admin.MapGet("/jobs", ListJobsAsync);
         admin.MapGet("/jobs/{id:guid}", async (Guid id, DupliDbContext db, CancellationToken ct) =>
-            ToDto(await db.Jobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct) ?? throw ApiException.NotFound("Job")));
-        operate.MapPost("/jobs/{id:guid}/cancel", async (Guid id, JobService jobs, CancellationToken ct) =>
-            ToDto(await jobs.RequestCancelAsync(id, ct)));
+            await ToDtoAsync(await db.Jobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct) ?? throw ApiException.NotFound("Job"), db, ct));
+        operate.MapPost("/jobs/{id:guid}/cancel", async (Guid id, JobService jobs, DupliDbContext db, CancellationToken ct) =>
+            await ToDtoAsync(await jobs.RequestCancelAsync(id, ct), db, ct));
 
         admin.MapGet("/runs", ListRunsAsync);
         admin.MapGet("/logs", ListLogsAsync);
@@ -99,6 +104,7 @@ public static class AdminApi
         admin.MapRestoreApi();
         admin.MapConnectionsApi();
         app.MapUsersApi();
+        app.MapNotificationsApi();
     }
 
     private static async Task<IResult> CreateStorageTargetAsync(CreateStorageTargetRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
@@ -157,6 +163,33 @@ public static class AdminApi
         agent.PinnedAgentVersion = string.IsNullOrWhiteSpace(request.PinnedAgentVersion) ? null : request.PinnedAgentVersion;
         agent.PinnedResticVersion = string.IsNullOrWhiteSpace(request.PinnedResticVersion) ? null : request.PinnedResticVersion;
         await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Same "desired state via heartbeat" pattern as an agent/restic update: the agent applies the new key on its
+    /// next heartbeat and reports back the version it applied. The secret never appears in the response.
+    /// </summary>
+    private static async Task<IResult> UpdateAgentStorageCredentialsAsync(
+        Guid id, UpdateAgentStorageCredentialsRequest request, DupliDbContext db, SecretProtector protector,
+        RepositoryBrowser browser, ClaimsPrincipal actor, TimeProvider time, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.AccessKeyId) || string.IsNullOrWhiteSpace(request.SecretAccessKey))
+            throw ApiException.BadRequest("accessKeyId and secretAccessKey are required");
+
+        var agent = await db.Agents.Include(a => a.StorageTarget).SingleOrDefaultAsync(a => a.Id == id, ct) ?? throw ApiException.NotFound("Agent");
+        var accessKeyId = request.AccessKeyId.Trim();
+
+        if (!request.SkipVerification)
+            await browser.VerifyCredentialsAsync(agent, accessKeyId, request.SecretAccessKey, ct);
+
+        agent.S3AccessKeyId = accessKeyId;
+        agent.S3SecretKeyProtected = protector.Protect(request.SecretAccessKey);
+        agent.S3CredentialsVersion++;
+        agent.S3CredentialsUpdatedAt = time.GetUtcNow();
+        agent.S3CredentialsUpdatedBy = OperatorAuth.Actor(actor);
+        await db.SaveChangesAsync(ct);
+        browser.Invalidate(id); // the cached snapshot list was built with the old key
         return Results.NoContent();
     }
 
@@ -222,7 +255,23 @@ public static class AdminApi
             throw ApiException.NotFound("Agent");
         var job = await jobs.CreateSystemJobAsync(id, request.Type, JobTrigger.Manual, time.GetUtcNow(), ct)
             ?? throw ApiException.Conflict($"A {request.Type} job is already pending for this agent");
-        return Results.Accepted($"/api/admin/jobs/{job.Id}", ToDto(job));
+        return Results.Accepted($"/api/admin/jobs/{job.Id}", await ToDtoAsync(job, db, ct));
+    }
+
+    /// <summary>Owner only. Deletes an idle agent (and, by cascade, its policies/sources, jobs, runs, logs,
+    /// alerts, notifications, connections and tokens). The repository itself is left untouched in the bucket.</summary>
+    private static async Task<IResult> DeleteAgentAsync(Guid id, DupliDbContext db, RepositoryBrowser browser, CancellationToken ct)
+    {
+        var agent = await db.Agents.FindAsync([id], ct) ?? throw ApiException.NotFound("Agent");
+        if (agent.Status == AgentStatus.Active)
+            throw ApiException.Conflict("Disable the agent before deleting it");
+        if (await db.Jobs.AnyAsync(j => j.AgentId == id && (j.State == JobState.Pending || j.State == JobState.Assigned || j.State == JobState.Running), ct))
+            throw ApiException.Conflict("The agent has an active job");
+
+        db.Agents.Remove(agent);
+        await db.SaveChangesAsync(ct); // one DELETE, cascaded by the FKs: atomic on its own, no explicit transaction needed.
+        browser.DeleteCache(id);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> CreatePolicyAsync(Guid id, PolicyRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
@@ -248,6 +297,9 @@ public static class AdminApi
         db.Sources.RemoveRange(policy.Sources);
         policy.Sources.Clear();
         Apply(policy, request, time.GetUtcNow());
+        // Sources carry a client-set Guid: discovered via the navigation of a tracked policy, EF would
+        // treat them as existing rows (UPDATE → 0 rows → DbUpdateConcurrencyException). Add them explicitly.
+        db.Sources.AddRange(policy.Sources);
         await SaveOrConflictAsync(db, "A policy with this name already exists for the agent", ct);
         return ToDto(policy);
     }
@@ -286,39 +338,90 @@ public static class AdminApi
         var policy = await LoadPolicyAsync(id, db, ct, tracking: false);
         var job = await jobs.CreateBackupJobAsync(policy, JobTrigger.Manual, time.GetUtcNow(), ct)
             ?? throw ApiException.Conflict("A backup job is already pending for this policy");
-        return Results.Accepted($"/api/admin/jobs/{job.Id}", ToDto(job));
+        return Results.Accepted($"/api/admin/jobs/{job.Id}", await ToDtoAsync(job, db, ct));
     }
 
-    private static async Task<IEnumerable<JobDto>> ListJobsAsync(
+    /// <summary>Runs every enabled policy of the agent. Coalescing (<see cref="JobService"/>) is per policy: one
+    /// already pending is silently skipped rather than failing the whole batch.</summary>
+    private static async Task<IEnumerable<JobDto>> RunAllPoliciesAsync(Guid id, DupliDbContext db, JobService jobs, TimeProvider time, CancellationToken ct)
+    {
+        if (!await db.Agents.AnyAsync(a => a.Id == id, ct))
+            throw ApiException.NotFound("Agent");
+        var policies = await db.Policies.AsNoTracking().Include(p => p.Sources)
+            .Where(p => p.AgentId == id && p.Enabled).OrderBy(p => p.Name).ToListAsync(ct);
+
+        var now = time.GetUtcNow();
+        var created = new List<Job>();
+        foreach (var policy in policies)
+        {
+            var job = await jobs.CreateBackupJobAsync(policy, JobTrigger.Manual, now, ct);
+            if (job is not null)
+                created.Add(job);
+        }
+        return await ToDtosAsync(created, db, ct);
+    }
+
+    private static async Task<PagedDto<JobDto>> ListJobsAsync(
         DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? policyId = null, JobState? state = null,
-        JobType? type = null, int limit = 100)
+        JobType? type = null, string? before = null, int limit = 100)
     {
         var query = db.Jobs.AsNoTracking();
         if (agentId is { } a) query = query.Where(j => j.AgentId == a);
         if (policyId is { } p) query = query.Where(j => j.PolicyId == p);
         if (state is { } s) query = query.Where(j => j.State == s);
         if (type is { } t) query = query.Where(j => j.Type == t);
-        return (await query.OrderByDescending(j => j.CreatedAt).Take(Clamp(limit)).ToListAsync(ct)).Select(ToDto);
+        if (before is { } cursor)
+        {
+            var (ts, id) = DecodeGuidCursor(cursor);
+            query = query.Where(j => j.CreatedAt < ts || (j.CreatedAt == ts && j.Id.CompareTo(id) < 0));
+        }
+
+        var take = Clamp(limit);
+        var page = await query.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).Take(take + 1).ToListAsync(ct);
+        var (items, next) = Page(page, take, j => EncodeCursor(j.CreatedAt, j.Id));
+        return new PagedDto<JobDto>(await ToDtosAsync(items, db, ct), next);
     }
 
-    private static async Task<IEnumerable<RunDto>> ListRunsAsync(
-        DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? policyId = null, int limit = 100)
+    private static async Task<PagedDto<RunDto>> ListRunsAsync(
+        DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? policyId = null, string? before = null, int limit = 100)
     {
         var query = db.Runs.AsNoTracking();
         if (agentId is { } a) query = query.Where(r => r.AgentId == a);
         if (policyId is { } p) query = query.Where(r => r.PolicyId == p);
-        return (await query.OrderByDescending(r => r.CompletedAt).Take(Clamp(limit)).ToListAsync(ct)).Select(ToDto);
+        if (before is { } cursor)
+        {
+            var (ts, id) = DecodeGuidCursor(cursor);
+            query = query.Where(r => r.CompletedAt < ts || (r.CompletedAt == ts && r.Id.CompareTo(id) < 0));
+        }
+
+        var take = Clamp(limit);
+        var page = await query.OrderByDescending(r => r.CompletedAt).ThenByDescending(r => r.Id).Take(take + 1).ToListAsync(ct);
+        var (items, next) = Page(page, take, r => EncodeCursor(r.CompletedAt, r.Id));
+        var (agentNames, policyNames) = await LoadNamesAsync(items.Select(r => r.AgentId), items.Select(r => (Guid?)r.PolicyId), db, ct);
+        return new PagedDto<RunDto>(items.Select(r => ToDto(r, agentNames, policyNames)).ToList(), next);
     }
 
-    private static async Task<IEnumerable<LogDto>> ListLogsAsync(
-        DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? jobId = null, string? level = null, int limit = 200)
+    private static async Task<PagedDto<LogDto>> ListLogsAsync(
+        DupliDbContext db, CancellationToken ct, Guid? agentId = null, Guid? jobId = null, string? level = null,
+        string? before = null, int limit = 200)
     {
         var query = db.Logs.AsNoTracking();
         if (agentId is { } a) query = query.Where(l => l.AgentId == a);
         if (jobId is { } j) query = query.Where(l => l.JobId == j);
         if (!string.IsNullOrEmpty(level)) query = query.Where(l => l.Level == level);
-        return (await query.OrderByDescending(l => l.Timestamp).ThenByDescending(l => l.Id).Take(Clamp(limit)).ToListAsync(ct))
-            .Select(l => new LogDto(l.Id, l.AgentId, l.JobId, l.Timestamp, l.Level, l.Message, l.Exception));
+        if (before is { } cursor)
+        {
+            var (ts, id) = DecodeLogCursor(cursor);
+            query = query.Where(l => l.Timestamp < ts || (l.Timestamp == ts && l.Id < id));
+        }
+
+        var take = Clamp(limit);
+        var page = await query.OrderByDescending(l => l.Timestamp).ThenByDescending(l => l.Id).Take(take + 1).ToListAsync(ct);
+        var (items, next) = Page(page, take, l => EncodeCursor(l.Timestamp, l.Id));
+        var (agentNames, _) = await LoadNamesAsync(items.Select(l => l.AgentId), [], db, ct);
+        return new PagedDto<LogDto>(
+            items.Select(l => new LogDto(l.Id, l.AgentId, agentNames.GetValueOrDefault(l.AgentId, l.AgentId.ToString()), l.JobId, l.Timestamp, l.Level, l.Message, l.Exception)).ToList(),
+            next);
     }
 
     private static async Task<IEnumerable<AlertDto>> ListAlertsAsync(
@@ -327,8 +430,13 @@ public static class AdminApi
         var query = db.Alerts.AsNoTracking();
         if (open) query = query.Where(a => a.ResolvedAt == null);
         if (agentId is { } id) query = query.Where(a => a.AgentId == id);
-        return (await query.OrderByDescending(a => a.OpenedAt).Take(Clamp(limit)).ToListAsync(ct))
-            .Select(a => new AlertDto(a.Id, a.Kind, a.SubjectKey, a.AgentId, a.PolicyId, a.Message, a.OpenedAt, a.ResolvedAt));
+        var alerts = await query.OrderByDescending(a => a.OpenedAt).Take(Clamp(limit)).ToListAsync(ct);
+        var (agentNames, policyNames) = await LoadNamesAsync(
+            alerts.Where(a => a.AgentId.HasValue).Select(a => a.AgentId!.Value), alerts.Select(a => a.PolicyId), db, ct);
+        return alerts.Select(a => new AlertDto(
+            a.Id, a.Kind, a.SubjectKey, a.AgentId, a.AgentId is { } aid ? agentNames.GetValueOrDefault(aid) : null,
+            a.PolicyId, a.PolicyId is { } pid ? policyNames.GetValueOrDefault(pid) : null,
+            a.Message, a.OpenedAt, a.ResolvedAt));
     }
 
     private static async Task<DashboardDto> DashboardAsync(
@@ -573,7 +681,8 @@ public static class AdminApi
         a.LastHeartbeatAt, a.LastBackupAt, a.FreeDiskSpace, a.StorageTargetId, a.StoragePrefix, a.CreatedAt, a.EnrolledAt,
         a.Platform, a.Channel, a.PinnedAgentVersion, a.PinnedResticVersion, a.LauncherManaged,
         desired.Agent?.Version, desired.Restic?.Version,
-        a.LastUpdateVersion, a.LastUpdateOutcome, a.LastUpdateError, a.LastUpdateAt, a.ResticUpdateError);
+        a.LastUpdateVersion, a.LastUpdateOutcome, a.LastUpdateError, a.LastUpdateAt, a.ResticUpdateError,
+        a.S3AccessKeyId, a.S3CredentialsVersion, a.S3CredentialsAppliedVersion, a.S3CredentialsUpdatedAt);
 
     private static ReleaseDto ToDto(SoftwareRelease r) =>
         new(r.Id, r.Product, r.Version, r.Platform, r.Channel, r.SourceUrl, r.Sha256, r.IsCurrent, r.CreatedAt);
@@ -591,12 +700,74 @@ public static class AdminApi
         return next is { } n ? new DateTimeOffset(n, TimeSpan.Zero) : null;
     }
 
-    internal static JobDto ToDto(Job j) => new(
-        j.Id, j.AgentId, j.PolicyId, j.Type, j.Trigger, j.State, j.CreatedAt, j.ScheduledAt, j.ExpiresAt,
+    /// <summary>Single-job endpoints: one extra round trip for the agent/policy name, not worth a caller-supplied dictionary.</summary>
+    internal static async Task<JobDto> ToDtoAsync(Job j, DupliDbContext db, CancellationToken ct)
+    {
+        var (agentNames, policyNames) = await LoadNamesAsync([j.AgentId], [j.PolicyId], db, ct);
+        return ToDto(j, agentNames, policyNames);
+    }
+
+    private static async Task<IReadOnlyList<JobDto>> ToDtosAsync(IReadOnlyList<Job> jobs, DupliDbContext db, CancellationToken ct)
+    {
+        var (agentNames, policyNames) = await LoadNamesAsync(jobs.Select(j => j.AgentId), jobs.Select(j => j.PolicyId), db, ct);
+        return jobs.Select(j => ToDto(j, agentNames, policyNames)).ToList();
+    }
+
+    private static JobDto ToDto(Job j, IReadOnlyDictionary<Guid, string> agentNames, IReadOnlyDictionary<Guid, string> policyNames) => new(
+        j.Id, j.AgentId, agentNames.GetValueOrDefault(j.AgentId, j.AgentId.ToString()),
+        j.PolicyId, j.PolicyId is { } pid ? policyNames.GetValueOrDefault(pid) : null,
+        j.Type, j.Trigger, j.State, j.CreatedAt, j.ScheduledAt, j.ExpiresAt,
         j.StartedAt, j.CompletedAt, j.CancelRequested, j.Error,
         j.ResultItems is null ? [] : JsonSerializer.Deserialize<List<JobItemResultDto>>(j.ResultItems, DupliJson.Options) ?? []);
 
-    private static RunDto ToDto(BackupRun r) => new(
-        r.Id, r.JobId, r.PolicyId, r.AgentId, r.StartedAt, r.CompletedAt, r.Status, r.BytesProcessed, r.BytesAdded,
+    private static RunDto ToDto(BackupRun r, IReadOnlyDictionary<Guid, string> agentNames, IReadOnlyDictionary<Guid, string> policyNames) => new(
+        r.Id, r.JobId, r.PolicyId, policyNames.GetValueOrDefault(r.PolicyId), r.AgentId, agentNames.GetValueOrDefault(r.AgentId, r.AgentId.ToString()),
+        r.StartedAt, r.CompletedAt, r.Status, r.BytesProcessed, r.BytesAdded,
         JsonSerializer.Deserialize<List<JobItemResultDto>>(r.Items, DupliJson.Options) ?? [], r.ErrorMessage);
+
+    /// <summary>Batches agent/policy name lookups for a page of results (one query each, not one per row).</summary>
+    private static async Task<(Dictionary<Guid, string> Agents, Dictionary<Guid, string> Policies)> LoadNamesAsync(
+        IEnumerable<Guid> agentIds, IEnumerable<Guid?> policyIds, DupliDbContext db, CancellationToken ct)
+    {
+        var aIds = agentIds.Distinct().ToList();
+        var pIds = policyIds.Where(p => p.HasValue).Select(p => p!.Value).Distinct().ToList();
+        var agents = aIds.Count == 0
+            ? []
+            : await db.Agents.AsNoTracking().Where(a => aIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.Name, ct);
+        var policies = pIds.Count == 0
+            ? []
+            : await db.Policies.AsNoTracking().Where(p => pIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Name, ct);
+        return (agents, policies);
+    }
+
+    /// <summary>Keyset paging: the caller fetches <paramref name="take"/> + 1 rows in the page's sort order;
+    /// the extra row (if present) becomes the opaque cursor for the next call and is not returned.</summary>
+    private static (List<T> Items, string? Next) Page<T>(List<T> fetched, int take, Func<T, string> cursor) =>
+        fetched.Count <= take ? (fetched, null) : (fetched.Take(take).ToList(), cursor(fetched[take - 1]));
+
+    private static string EncodeCursor(DateTimeOffset timestamp, object id) => $"{timestamp.UtcTicks}_{id}";
+
+    private static (DateTimeOffset Timestamp, string RawId) DecodeCursor(string cursor)
+    {
+        var separator = cursor.IndexOf('_');
+        if (separator < 0 || !long.TryParse(cursor.AsSpan(0, separator), out var ticks))
+            throw ApiException.BadRequest("Invalid 'before' cursor");
+        return (new DateTimeOffset(ticks, TimeSpan.Zero), cursor[(separator + 1)..]);
+    }
+
+    private static (DateTimeOffset Timestamp, Guid Id) DecodeGuidCursor(string cursor)
+    {
+        var (timestamp, rawId) = DecodeCursor(cursor);
+        if (!Guid.TryParse(rawId, out var id))
+            throw ApiException.BadRequest("Invalid 'before' cursor");
+        return (timestamp, id);
+    }
+
+    private static (DateTimeOffset Timestamp, long Id) DecodeLogCursor(string cursor)
+    {
+        var (timestamp, rawId) = DecodeCursor(cursor);
+        if (!long.TryParse(rawId, out var id))
+            throw ApiException.BadRequest("Invalid 'before' cursor");
+        return (timestamp, id);
+    }
 }

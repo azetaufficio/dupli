@@ -89,6 +89,9 @@ public sealed class ServerClient
     public Task<RotateSecretResponse> RotateSecretAsync(CancellationToken ct) =>
         SendAsync<RotateSecretResponse>(HttpMethod.Post, "api/agents/secret/rotate", null, ct);
 
+    public Task<StorageCredentialsResponse> GetStorageCredentialsAsync(CancellationToken ct) =>
+        SendAsync<StorageCredentialsResponse>(HttpMethod.Get, "api/agents/storage-credentials", null, ct);
+
     private Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
         _retry.ExecuteAsync(async token =>
         {

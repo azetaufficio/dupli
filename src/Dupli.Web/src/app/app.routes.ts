@@ -44,6 +44,17 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/alerts').then((m) => m.AlertsPage),
   },
   {
+    path: 'notifications',
+    title: 'Notifications · Dupli',
+    loadComponent: () => import('./pages/notifications').then((m) => m.NotificationsPage),
+  },
+  {
+    path: 'settings/notifications',
+    title: 'Notification settings · Dupli',
+    loadComponent: () =>
+      import('./pages/notification-settings').then((m) => m.NotificationSettingsPage),
+  },
+  {
     path: 'storage',
     title: 'Storage · Dupli',
     loadComponent: () => import('./pages/storage').then((m) => m.StoragePage),

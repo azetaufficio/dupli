@@ -59,6 +59,8 @@ public static class AgentEnrollment
         secrets.Set(SecretNames.RepositoryPassword, registration.RepositoryPassword);
         secrets.Set(SecretNames.S3AccessKey, registration.S3AccessKeyId);
         secrets.Set(SecretNames.S3SecretKey, registration.S3SecretAccessKey);
+        // Enrollment already delivers the current S3 key: nothing to apply after the fact.
+        await StorageCredentialsStateFile.WriteAsync(paths, registration.S3CredentialsVersion, cancellationToken);
 
         // Keep local settings (retry, cache dir) of an existing install; server mode replaces the rest.
         var previous = File.Exists(paths.ConfigFile) ? AgentConfigLoader.Load(paths.ConfigFile) : null;

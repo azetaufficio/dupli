@@ -60,6 +60,7 @@ public static class AgentServiceHost
         {
             services.AddSingleton(logBuffer!);
             services.AddSingleton(new JobLedger(paths.LedgerFile));
+            services.AddSingleton<Dupli.Agent.Core.Secrets.ISecretStore>(sp => sp.GetRequiredService<AgentRuntime>().Secrets);
             services.AddSingleton(sp => new ServerClient(
                 new HttpClient { Timeout = TimeSpan.FromSeconds(100) },
                 server,

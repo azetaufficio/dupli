@@ -1,9 +1,10 @@
 import { httpResource } from '@angular/common/http';
-import { Component, computed, signal } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { params } from '../core/api.service';
-import { Agent, Policy, Run } from '../core/models';
-import { RunsTable, lookup } from '../shared/tables';
+import { ApiService } from '../core/api.service';
+import { Agent } from '../core/models';
+import { PagedList } from '../shared/paged-list';
+import { RunsTable } from '../shared/tables';
 
 @Component({
   selector: 'app-history',
@@ -12,10 +13,10 @@ import { RunsTable, lookup } from '../shared/tables';
     <div class="page-header">
       <div>
         <h1>Backup history</h1>
-        <p class="muted">Most recent 200 runs.</p>
+        <p class="muted">Most recent runs, newest first.</p>
       </div>
       <div class="toolbar">
-        <select [ngModel]="agentId()" (ngModelChange)="agentId.set($event)" style="width: auto">
+        <select [ngModel]="agentId()" (ngModelChange)="onAgentChange($event)" style="width: auto">
           <option value="">All agents</option>
           @for (a of agents.value() ?? []; track a.id) {
             <option [value]="a.id">{{ a.name }}</option>
@@ -25,23 +26,37 @@ import { RunsTable, lookup } from '../shared/tables';
       </div>
     </div>
     <section class="card flush">
-      <app-runs-table
-        [runs]="runs.value() ?? []"
-        [agents]="agentNames()"
-        [policies]="policyNames()"
-        [showAgent]="true"
-      />
+      <app-runs-table [runs]="runs.items()" [showAgent]="true" />
+      @if (runs.next()) {
+        <div class="toolbar" style="padding: 1rem">
+          <button
+            type="button"
+            class="btn"
+            [disabled]="runs.loadingMore()"
+            (click)="runs.loadMore()"
+          >
+            {{ runs.loadingMore() ? 'Loading…' : 'Load more' }}
+          </button>
+        </div>
+      }
     </section>
   `,
 })
 export class HistoryPage {
+  private readonly api = inject(ApiService);
+
   protected readonly agentId = signal('');
   protected readonly agents = httpResource<Agent[]>(() => '/api/admin/agents');
-  protected readonly policies = httpResource<Policy[]>(() => '/api/admin/policies');
-  protected readonly runs = httpResource<Run[]>(() => ({
-    url: '/api/admin/runs',
-    params: params({ agentId: this.agentId(), limit: 200 }),
-  }));
-  protected readonly agentNames = computed(() => lookup(this.agents.value()));
-  protected readonly policyNames = computed(() => lookup(this.policies.value()));
+  protected readonly runs = new PagedList((before) =>
+    this.api.runs({ agentId: this.agentId() || undefined, before, limit: 100 }),
+  );
+
+  constructor() {
+    this.runs.reload();
+  }
+
+  protected onAgentChange(agentId: string): void {
+    this.agentId.set(agentId);
+    this.runs.reload();
+  }
 }

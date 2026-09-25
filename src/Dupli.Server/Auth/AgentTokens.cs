@@ -23,6 +23,10 @@ public static class AuthConstants
     /// <summary>Operator user management: Owner, or a break-glass session opened with the admin key.</summary>
     public const string UsersPolicy = "Users";
 
+    /// <summary>The signed-in operator's own notifications: any role, but not the admin key or break-glass
+    /// (neither has an <see cref="OperatorClaims.UserId"/> to own a feed).</summary>
+    public const string MePolicy = "Me";
+
     /// <summary>Only a break-glass session (the <c>/admin</c> page).</summary>
     public const string BreakGlassPolicy = "BreakGlass";
 

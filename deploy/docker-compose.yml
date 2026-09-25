@@ -48,7 +48,6 @@ services:
       Notifications__Smtp__Username: ${SMTP_USERNAME:-}
       Notifications__Smtp__Password: ${SMTP_PASSWORD:-}
       Notifications__Smtp__From: ${SMTP_FROM:-dupli@localhost}
-      Notifications__Smtp__To__0: ${SMTP_TO:-}
       Notifications__Office365__Credential: ${O365_CREDENTIAL:-ClientSecret}
       Notifications__Office365__TenantId: ${O365_TENANT_ID:-}
       Notifications__Office365__ClientId: ${O365_CLIENT_ID:-}
@@ -56,7 +55,6 @@ services:
       Notifications__Office365__CertificatePath: ${O365_CERTIFICATE_PATH:-}
       Notifications__Office365__CertificatePassword: ${O365_CERTIFICATE_PASSWORD:-}
       Notifications__Office365__From: ${O365_FROM:-}
-      Notifications__Office365__To__0: ${O365_TO:-}
       Notifications__Office365__SaveToSentItems: ${O365_SAVE_TO_SENT_ITEMS:-false}
     volumes:
       # Keep the key ring OUT of the database volume and back it up separately:

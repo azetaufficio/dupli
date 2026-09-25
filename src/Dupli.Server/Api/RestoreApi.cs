@@ -96,7 +96,7 @@ public static partial class RestoreApi
 
         var job = await jobs.CreateRestoreJobAsync(id, payload, time.GetUtcNow(), ct)
             ?? throw ApiException.Conflict("A restore is already pending for this agent");
-        return Results.Accepted($"/api/admin/jobs/{job.Id}", AdminApi.ToDto(job));
+        return Results.Accepted($"/api/admin/jobs/{job.Id}", await AdminApi.ToDtoAsync(job, db, ct));
     }
 
     private static PostgresRestoreDto PostgresRestore(SnapshotInfo snapshot, string newDatabase, PgConnection connection)

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Dupli.Agent.Configuration;
+using Dupli.Agent.Core.Secrets;
 using Dupli.Agent.Logging;
 using Dupli.Agent.Updates;
 using Dupli.Contracts.Agents;
@@ -19,6 +20,7 @@ public sealed class ServerAgentLoop(
     JobExecutor executor,
     AgentConfig config,
     AgentPaths paths,
+    ISecretStore secrets,
     TimeProvider time,
     IAgentRestarter restarter,
     ILogger<ServerAgentLoop> logger,
@@ -27,6 +29,7 @@ public sealed class ServerAgentLoop(
     private HeartbeatResponse? _desired;
     private TimeSpan _pollInterval = TimeSpan.FromSeconds(Math.Max(5, config.Server?.PollIntervalSeconds ?? 30));
     private bool _recovered;
+    private int _storageCredentialsVersion = StorageCredentialsStateFile.Read(paths);
 
     /// <summary>How often a running job renews its lease and checks for cancellation.</summary>
     public TimeSpan LeaseRenewalInterval { get; init; } = TimeSpan.FromSeconds(60);
@@ -148,10 +151,34 @@ public sealed class ServerAgentLoop(
             LastBackupAt = ledger.LastSuccessfulBackupAt(),
             RunningJobs = ledger.RunningJobIds(),
             FreeDiskSpace = FreeDiskSpace(),
+            StorageCredentialsVersion = _storageCredentialsVersion,
         };
         var response = await server.HeartbeatAsync(updates?.Describe(request) ?? request, ct);
         _desired = response;
         _pollInterval = TimeSpan.FromSeconds(Math.Max(5, response.PollIntervalSeconds));
+
+        // Not gated on being idle: a job already running keeps the old key (it captured its own RepositoryTarget
+        // at the start), the next one picks up whatever secrets.Set below just wrote.
+        if (response.StorageCredentialsVersion > _storageCredentialsVersion)
+            await ApplyStorageCredentialsAsync(ct);
+    }
+
+    private async Task ApplyStorageCredentialsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var credentials = await server.GetStorageCredentialsAsync(ct);
+            secrets.Set(SecretNames.S3AccessKey, credentials.AccessKeyId);
+            secrets.Set(SecretNames.S3SecretKey, credentials.SecretAccessKey);
+            await StorageCredentialsStateFile.WriteAsync(paths, credentials.Version, ct);
+            _storageCredentialsVersion = credentials.Version;
+            logger.LogInformation("Applied storage credentials version {Version}", credentials.Version);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Retried on the next heartbeat: the server still reports the higher desired version until then.
+            logger.LogWarning(ex, "Could not fetch the new storage credentials; will retry");
+        }
     }
 
     private async Task RunJobAsync(AgentJobDto job, CancellationToken stoppingToken)

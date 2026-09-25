@@ -38,12 +38,10 @@ export type NameLookup = Record<string, string>;
                 <td class="nowrap">{{ job.type }}</td>
                 @if (showAgent()) {
                   <td>
-                    <a [routerLink]="['/agents', job.agentId]">{{
-                      agents()[job.agentId] ?? job.agentId
-                    }}</a>
+                    <a [routerLink]="['/agents', job.agentId]">{{ job.agentName }}</a>
                   </td>
                 }
-                <td>{{ job.policyId ? (policies()[job.policyId] ?? '—') : '—' }}</td>
+                <td>{{ job.policyName ?? '—' }}</td>
                 <td>{{ job.trigger }}</td>
                 <td>
                   <app-badge [value]="job.state" />
@@ -72,8 +70,6 @@ export type NameLookup = Record<string, string>;
 export class JobsTable {
   protected readonly auth = inject(AuthService);
   readonly jobs = input.required<Job[]>();
-  readonly agents = input<NameLookup>({});
-  readonly policies = input<NameLookup>({});
   readonly showAgent = input(false);
   readonly cancel = output<Job>();
 
@@ -158,12 +154,10 @@ export class ItemsTable {
                 <td class="nowrap">{{ run.completedAt | datetime }}</td>
                 @if (showAgent()) {
                   <td>
-                    <a [routerLink]="['/agents', run.agentId]">{{
-                      agents()[run.agentId] ?? run.agentId
-                    }}</a>
+                    <a [routerLink]="['/agents', run.agentId]">{{ run.agentName }}</a>
                   </td>
                 }
-                <td>{{ policies()[run.policyId] ?? '—' }}</td>
+                <td>{{ run.policyName ?? '—' }}</td>
                 <td><app-badge [value]="run.status" /></td>
                 <td class="nowrap">{{ run.startedAt | duration: run.completedAt }}</td>
                 <td class="num">{{ run.bytesProcessed | bytes }}</td>
@@ -191,8 +185,6 @@ export class ItemsTable {
 })
 export class RunsTable {
   readonly runs = input.required<Run[]>();
-  readonly agents = input<NameLookup>({});
-  readonly policies = input<NameLookup>({});
   readonly showAgent = input(false);
   protected readonly expanded = signal<string | null>(null);
 
@@ -226,9 +218,7 @@ export class RunsTable {
                 <td class="nowrap">{{ log.timestamp | datetime }}</td>
                 @if (showAgent()) {
                   <td class="nowrap">
-                    <a [routerLink]="['/agents', log.agentId]">{{
-                      agents()[log.agentId] ?? log.agentId
-                    }}</a>
+                    <a [routerLink]="['/agents', log.agentId]">{{ log.agentName }}</a>
                   </td>
                 }
                 <td><app-badge [value]="log.level" /></td>
@@ -248,7 +238,6 @@ export class RunsTable {
 })
 export class LogsTable {
   readonly logs = input.required<LogEntry[]>();
-  readonly agents = input<NameLookup>({});
   readonly showAgent = input(false);
 }
 
@@ -268,6 +257,7 @@ export class LogsTable {
               @if (showAgent()) {
                 <th>Agent</th>
               }
+              <th>Policy</th>
               <th>Message</th>
               <th>Opened</th>
               <th>Resolved</th>
@@ -281,12 +271,11 @@ export class LogsTable {
                 @if (showAgent()) {
                   <td class="nowrap">
                     @if (alert.agentId) {
-                      <a [routerLink]="['/agents', alert.agentId]">{{
-                        agents()[alert.agentId] ?? alert.agentId
-                      }}</a>
+                      <a [routerLink]="['/agents', alert.agentId]">{{ alert.agentName }}</a>
                     }
                   </td>
                 }
+                <td>{{ alert.policyName ?? '—' }}</td>
                 <td>{{ alert.message }}</td>
                 <td class="nowrap" [title]="alert.openedAt | datetime">
                   {{ alert.openedAt | relative }}
@@ -302,7 +291,6 @@ export class LogsTable {
 })
 export class AlertsTable {
   readonly alerts = input.required<Alert[]>();
-  readonly agents = input<NameLookup>({});
   readonly showAgent = input(false);
 
   protected kindLabel(alert: Alert): string {

@@ -18,7 +18,7 @@ import { lookup } from '../shared/tables';
     <div class="page-header">
       <div>
         <h1>Agents</h1>
-        <p class="muted">One agent per Windows VM, each with its own restic repository.</p>
+        <p class="muted">One agent per Host, each with its own restic repository.</p>
       </div>
       @if (auth.canOperate()) {
         <div class="toolbar">

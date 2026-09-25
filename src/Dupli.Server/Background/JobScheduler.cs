@@ -102,7 +102,23 @@ public sealed class JobScheduler(
     }
 }
 
-public sealed class JobSweeper(JobService jobs) : IPeriodicTask
+/// <summary>Also purges the notification feed: <see cref="JobService.SweepAsync"/> and this share a schedule,
+/// there is no dedicated worker for either.</summary>
+public sealed class JobSweeper(JobService jobs, DupliDbContext db, IOptions<DupliServerOptions> options, TimeProvider time) : IPeriodicTask
 {
-    public Task RunOnceAsync(CancellationToken cancellationToken) => jobs.SweepAsync(cancellationToken);
+    public async Task RunOnceAsync(CancellationToken cancellationToken)
+    {
+        await jobs.SweepAsync(cancellationToken);
+        await SweepNotificationsAsync(cancellationToken);
+    }
+
+    private async Task SweepNotificationsAsync(CancellationToken ct)
+    {
+        var cutoff = time.GetUtcNow() - TimeSpan.FromDays(options.Value.Notifications.RetentionDays);
+        var stale = await db.Notifications.Where(n => n.CreatedAt < cutoff).ToListAsync(ct);
+        if (stale.Count == 0)
+            return;
+        db.Notifications.RemoveRange(stale);
+        await db.SaveChangesAsync(ct);
+    }
 }
