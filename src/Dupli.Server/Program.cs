@@ -5,7 +5,6 @@ using Dupli.Server.Auth;
 using Dupli.Server.Background;
 using Dupli.Server.Configuration;
 using Dupli.Server.Hosting;
-using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Infrastructure.Database;
 using Dupli.Server.Infrastructure.Notifications;
 using Dupli.Server.Infrastructure.Security;
@@ -109,15 +108,6 @@ DatabaseMigrator.Migrate(connectionString, loggerFactory.CreateLogger("Dupli.Mig
 
 var authLogger = loggerFactory.CreateLogger("Dupli.Auth");
 await OperatorDirectory.EnsureBootstrapConfiguredAsync(app.Services, serverOptions, authLogger);
-if (!string.IsNullOrWhiteSpace(app.Configuration["Dupli:Auth:EntraId:RequiredRole"]))
-    authLogger.LogWarning("Dupli:Auth:EntraId:RequiredRole is no longer used and is ignored: access is managed on the Users page");
-
-var smtpOptions = app.Services.GetRequiredService<IOptions<SmtpOptions>>().Value;
-var office365Options = app.Services.GetRequiredService<IOptions<Office365Options>>().Value;
-if (smtpOptions.To.Any(t => !string.IsNullOrWhiteSpace(t)) || office365Options.To.Any(t => !string.IsNullOrWhiteSpace(t)))
-    authLogger.LogWarning(
-        "Notifications:Smtp:To / Notifications:Office365:To is no longer used and is ignored: " +
-        "recipients are resolved from each operator's notification preferences (Owner and Operator get e-mail by default)");
 
 // Load the key ring now: an unreachable Key Vault or unwritable key directory must fail the startup, not every
 // request that later unprotects a secret or a session cookie.
