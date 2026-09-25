@@ -1,6 +1,7 @@
 import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
@@ -51,28 +52,23 @@ function emptyImportForm(): ImportForm {
 
 @Component({
   selector: 'app-releases',
-  imports: [Badge, DateTimePipe, FormsModule],
+  imports: [Badge, DateTimePipe, FormsModule, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Releases</h1>
-        <p class="muted">
-          Agent and restic versions mirrored by the server and distributed via the heartbeat.
-        </p>
+        <h1>{{ 'releases.title' | transloco }}</h1>
+        <p class="muted">{{ 'releases.subtitle' | transloco }}</p>
       </div>
     </div>
 
     @if (auth.isOwner()) {
       <section class="card">
-        <h2>Import from GitHub</h2>
-        <p class="muted">
-          Registers the agent releases found on the <code>v&lt;version&gt;</code> tag of the
-          configured repository (one per available platform).
-        </p>
+        <h2>{{ 'releases.importForm.title' | transloco }}</h2>
+        <p class="muted" [innerHTML]="'releases.importForm.description' | transloco"></p>
         <form class="form" (ngSubmit)="importFromGitHub()" #imp="ngForm">
           <div class="form-row">
             <label class="field"
-              >Version
+              >{{ 'releases.importForm.versionLabel' | transloco }}
               <input
                 name="importVersion"
                 [(ngModel)]="importForm.version"
@@ -81,7 +77,7 @@ function emptyImportForm(): ImportForm {
               />
             </label>
             <label class="field">
-              Channel
+              {{ 'releases.importForm.channelLabel' | transloco }}
               <select name="importChannel" [(ngModel)]="importForm.channel">
                 @for (c of channels; track c) {
                   <option [value]="c">{{ c }}</option>
@@ -94,7 +90,7 @@ function emptyImportForm(): ImportForm {
                 name="importMakeCurrent"
                 [(ngModel)]="importForm.makeCurrent"
               />
-              Make current
+              {{ 'releases.makeCurrentCheckbox' | transloco }}
             </label>
           </div>
           @if (importError()) {
@@ -102,25 +98,25 @@ function emptyImportForm(): ImportForm {
           }
           <div class="toolbar">
             <button type="submit" class="btn primary" [disabled]="imp.invalid || importing()">
-              Import
+              {{ 'releases.importForm.submit' | transloco }}
             </button>
           </div>
         </form>
       </section>
 
       <section class="card">
-        <h2>Register manually</h2>
+        <h2>{{ 'releases.manualForm.title' | transloco }}</h2>
         <form class="form" (ngSubmit)="registerManually()" #man="ngForm">
           <div class="form-row">
             <label class="field">
-              Product
+              {{ 'releases.manualForm.productLabel' | transloco }}
               <select name="manualProduct" [(ngModel)]="manualForm.product">
                 <option value="agent">agent</option>
                 <option value="restic">restic</option>
               </select>
             </label>
             <label class="field"
-              >Version
+              >{{ 'releases.manualForm.versionLabel' | transloco }}
               <input
                 name="manualVersion"
                 [(ngModel)]="manualForm.version"
@@ -129,7 +125,7 @@ function emptyImportForm(): ImportForm {
               />
             </label>
             <label class="field">
-              Platform
+              {{ 'releases.manualForm.platformLabel' | transloco }}
               <select name="manualPlatform" [(ngModel)]="manualForm.platform">
                 @for (p of platforms; track p) {
                   <option [value]="p">{{ p }}</option>
@@ -138,7 +134,7 @@ function emptyImportForm(): ImportForm {
             </label>
             @if (manualForm.product === 'agent') {
               <label class="field">
-                Channel
+                {{ 'releases.manualForm.channelLabel' | transloco }}
                 <select name="manualChannel" [(ngModel)]="manualForm.channel">
                   @for (c of channels; track c) {
                     <option [value]="c">{{ c }}</option>
@@ -149,7 +145,7 @@ function emptyImportForm(): ImportForm {
           </div>
           <div class="form-row">
             <label class="field"
-              >Source URL
+              >{{ 'releases.manualForm.sourceUrlLabel' | transloco }}
               <input
                 name="manualSourceUrl"
                 type="url"
@@ -159,7 +155,7 @@ function emptyImportForm(): ImportForm {
               />
             </label>
             <label class="field"
-              >sha256
+              >{{ 'releases.manualForm.sha256Label' | transloco }}
               <input
                 name="manualSha256"
                 class="mono"
@@ -174,7 +170,7 @@ function emptyImportForm(): ImportForm {
                 name="manualMakeCurrent"
                 [(ngModel)]="manualForm.makeCurrent"
               />
-              Make current
+              {{ 'releases.makeCurrentCheckbox' | transloco }}
             </label>
           </div>
           @if (manualError()) {
@@ -182,7 +178,7 @@ function emptyImportForm(): ImportForm {
           }
           <div class="toolbar">
             <button type="submit" class="btn primary" [disabled]="man.invalid || registering()">
-              Register
+              {{ 'releases.manualForm.submit' | transloco }}
             </button>
           </div>
         </form>
@@ -190,21 +186,21 @@ function emptyImportForm(): ImportForm {
     }
 
     <section class="card flush">
-      <div class="card-header"><h2>Agent</h2></div>
+      <div class="card-header"><h2>{{ 'releases.agentSection.title' | transloco }}</h2></div>
       @if ((agentReleases.value() ?? []).length === 0) {
-        <div class="empty">No agent releases registered.</div>
+        <div class="empty">{{ 'releases.agentSection.empty' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Version</th>
-                <th>Platform</th>
-                <th>Channel</th>
-                <th>Current</th>
-                <th>sha256</th>
-                <th>Source URL</th>
-                <th>Created</th>
+                <th>{{ 'releases.table.version' | transloco }}</th>
+                <th>{{ 'releases.table.platform' | transloco }}</th>
+                <th>{{ 'releases.table.channel' | transloco }}</th>
+                <th>{{ 'releases.table.current' | transloco }}</th>
+                <th>{{ 'releases.table.sha256' | transloco }}</th>
+                <th>{{ 'releases.table.sourceUrl' | transloco }}</th>
+                <th>{{ 'releases.table.created' | transloco }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -216,7 +212,7 @@ function emptyImportForm(): ImportForm {
                   <td class="mono">{{ r.channel ?? '—' }}</td>
                   <td>
                     @if (r.isCurrent) {
-                      <app-badge value="Active" text="Current" />
+                      <app-badge value="Active" [text]="'releases.currentBadge' | transloco" />
                     } @else {
                       <span class="muted">—</span>
                     }
@@ -227,7 +223,7 @@ function emptyImportForm(): ImportForm {
                   <td class="num">
                     @if (!r.isCurrent && auth.isOwner()) {
                       <button type="button" class="btn small" (click)="makeCurrent(r)">
-                        Make current
+                        {{ 'releases.makeCurrentButton' | transloco }}
                       </button>
                     }
                   </td>
@@ -240,21 +236,21 @@ function emptyImportForm(): ImportForm {
     </section>
 
     <section class="card flush">
-      <div class="card-header"><h2>restic</h2></div>
+      <div class="card-header"><h2>{{ 'releases.resticSection.title' | transloco }}</h2></div>
       @if ((resticReleases.value() ?? []).length === 0) {
-        <div class="empty">No restic releases registered.</div>
+        <div class="empty">{{ 'releases.resticSection.empty' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Version</th>
-                <th>Platform</th>
-                <th>Channel</th>
-                <th>Current</th>
-                <th>sha256</th>
-                <th>Source URL</th>
-                <th>Created</th>
+                <th>{{ 'releases.table.version' | transloco }}</th>
+                <th>{{ 'releases.table.platform' | transloco }}</th>
+                <th>{{ 'releases.table.channel' | transloco }}</th>
+                <th>{{ 'releases.table.current' | transloco }}</th>
+                <th>{{ 'releases.table.sha256' | transloco }}</th>
+                <th>{{ 'releases.table.sourceUrl' | transloco }}</th>
+                <th>{{ 'releases.table.created' | transloco }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -266,7 +262,7 @@ function emptyImportForm(): ImportForm {
                   <td class="mono">{{ r.channel ?? '—' }}</td>
                   <td>
                     @if (r.isCurrent) {
-                      <app-badge value="Active" text="Current" />
+                      <app-badge value="Active" [text]="'releases.currentBadge' | transloco" />
                     } @else {
                       <span class="muted">—</span>
                     }
@@ -277,7 +273,7 @@ function emptyImportForm(): ImportForm {
                   <td class="num">
                     @if (!r.isCurrent && auth.isOwner()) {
                       <button type="button" class="btn small" (click)="makeCurrent(r)">
-                        Make current
+                        {{ 'releases.makeCurrentButton' | transloco }}
                       </button>
                     }
                   </td>
@@ -295,6 +291,7 @@ export class ReleasesPage {
   private readonly api = inject(ApiService);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly channels = AGENT_CHANNELS;
   protected readonly platforms = AGENT_PLATFORMS;
@@ -330,7 +327,9 @@ export class ReleasesPage {
       )
       .subscribe({
         next: (releases) => {
-          this.toasts.success(`Imported ${releases.length} release(s)`);
+          this.toasts.success(
+            this.transloco.translate('releases.toasts.imported', { count: releases.length }),
+          );
           this.importForm = emptyImportForm();
           this.importing.set(false);
           this.agentReleases.reload();
@@ -371,7 +370,12 @@ export class ReleasesPage {
           );
     call.subscribe({
       next: (release) => {
-        this.toasts.success(`Release ${release.version} (${release.platform}) registered`);
+        this.toasts.success(
+          this.transloco.translate('releases.toasts.registered', {
+            version: release.version,
+            platform: release.platform,
+          }),
+        );
         const product = this.manualForm.product;
         this.manualForm = emptyManualForm();
         this.manualForm.product = product;
@@ -387,15 +391,27 @@ export class ReleasesPage {
   }
 
   protected async makeCurrent(r: Release): Promise<void> {
+    const message = r.channel
+      ? this.transloco.translate('releases.confirmMakeCurrent.messageWithChannel', {
+          channel: r.channel,
+        })
+      : this.transloco.translate('releases.confirmMakeCurrent.messageBase');
     const ok = await this.confirm.ask(
-      `Make ${r.version} (${r.platform}) current?`,
-      'It will become the desired version for agents on this platform' +
-        (r.channel ? ` and channel ${r.channel}.` : '.'),
-      { confirmLabel: 'Make current' },
+      this.transloco.translate('releases.confirmMakeCurrent.title', {
+        version: r.version,
+        platform: r.platform,
+      }),
+      message,
+      { confirmLabel: this.transloco.translate('releases.makeCurrentButton') },
     );
     if (!ok) return;
     this.api.makeReleaseCurrent(r.id).subscribe(() => {
-      this.toasts.success(`${r.version} (${r.platform}) is now current`);
+      this.toasts.success(
+        this.transloco.translate('releases.toasts.nowCurrent', {
+          version: r.version,
+          platform: r.platform,
+        }),
+      );
       this.agentReleases.reload();
       this.resticReleases.reload();
     });

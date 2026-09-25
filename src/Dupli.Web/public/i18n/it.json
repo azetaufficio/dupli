@@ -1,0 +1,726 @@
+{
+  "common": {
+    "loading": "Caricamento…",
+    "cancel": "Annulla",
+    "save": "Salva",
+    "close": "Chiudi",
+    "delete": "Elimina",
+    "edit": "Modifica",
+    "yes": "Sì",
+    "no": "No",
+    "confirm": "Conferma",
+    "dismiss": "Chiudi notifica"
+  },
+  "app": {
+    "menuToggle": "Menu",
+    "nav": {
+      "dashboard": "Dashboard",
+      "agents": "Agenti",
+      "history": "Cronologia",
+      "logs": "Log",
+      "alerts": "Avvisi",
+      "storage": "Storage",
+      "releases": "Release",
+      "users": "Utenti"
+    },
+    "bell": {
+      "ariaLabel": "Notifiche",
+      "empty": "Nessuna notifica.",
+      "markAllRead": "Segna tutte come lette",
+      "seeAll": "Vedi tutte"
+    },
+    "userMenu": {
+      "ariaLabel": "Menu account",
+      "language": "Lingua",
+      "settings": "Impostazioni",
+      "signOut": "Esci"
+    },
+    "loginNotConfigured": {
+      "title": "L'accesso interattivo non è configurato",
+      "body": "Imposta <code>Dupli__Auth__Mode=EntraId</code> e le impostazioni Entra ID sul server per usare l'interfaccia web. L'API di amministrazione resta disponibile con l'header <code>X-Dupli-Admin-Key</code>."
+    }
+  },
+  "alertKind": {
+    "AgentOffline": {
+      "label": "Agente offline",
+      "description": "Un agente non invia un heartbeat da un po'."
+    },
+    "BackupFailed": {
+      "label": "Backup fallito",
+      "description": "Un job di backup è fallito o è andato in timeout."
+    },
+    "BackupMissed": {
+      "label": "Backup mancato",
+      "description": "Un backup pianificato non è stato eseguito."
+    },
+    "BackupTooOld": {
+      "label": "Backup troppo vecchio",
+      "description": "Una policy non ha un backup riuscito da troppo tempo."
+    },
+    "RepositoryCheckFailed": {
+      "label": "Controllo repository fallito",
+      "description": "Un controllo di integrità del repository è fallito."
+    },
+    "RestoreTestFailed": {
+      "label": "Test di ripristino fallito",
+      "description": "Un test di ripristino pianificato è fallito."
+    },
+    "AgentUpdateFailed": {
+      "label": "Aggiornamento agente fallito",
+      "description": "Un aggiornamento agente è stato annullato (rollback)."
+    },
+    "AgentOutdated": {
+      "label": "Agente non aggiornato",
+      "description": "Un agente è bloccato da tempo su una versione diversa da quella desiderata."
+    }
+  },
+  "notificationPreferences": {
+    "table": {
+      "alert": "Avviso",
+      "description": "Descrizione",
+      "mail": "Mail",
+      "inApp": "In-app"
+    },
+    "mailAriaLabel": "{{alert}} via mail",
+    "inAppAriaLabel": "{{alert}} in-app"
+  },
+  "notifications": {
+    "title": "Notifiche",
+    "subtitle": "Apertura e risoluzione degli avvisi a cui sei iscritto.",
+    "unread": "Non lette",
+    "all": "Tutte",
+    "markAllRead": "Segna tutte come lette",
+    "empty": "Nessuna notifica.",
+    "loadMore": "Carica altre",
+    "resolved": "risolto",
+    "opened": "aperto"
+  },
+  "users": {
+    "title": "Utenti",
+    "subtitle": "Chi può accedere. <strong>Viewer</strong> ha accesso in sola lettura; <strong>Operator</strong> esegue i backup, sfoglia gli snapshot ed esegue i ripristini; <strong>Owner</strong> gestisce anche utenti, storage target e release."
+  },
+  "notificationSettings": {
+    "title": "Impostazioni notifiche",
+    "subtitle": "Scegli e-mail e/o in-app per ogni tipo di avviso. I tipi non impostati usano l'in-app per tutti e la mail per Owner e Operator."
+  },
+  "accessDenied": {
+    "title": "Accesso negato",
+    "accountNotEnabled": "non è abilitato in Dupli.",
+    "thisAccountNotEnabled": "Questo account non è abilitato in Dupli.",
+    "askOwner": "Chiedi a un owner di invitarti, poi accedi di nuovo.",
+    "signInAnotherAccount": "Accedi con un altro account"
+  },
+  "alerts": {
+    "title": "Avvisi",
+    "subtitle": "Valutati ogni minuto. Le notifiche vengono inviate via e-mail all'apertura e alla risoluzione di un avviso.",
+    "open": "Aperti",
+    "all": "Tutti"
+  },
+  "history": {
+    "title": "Cronologia backup",
+    "subtitle": "Esecuzioni più recenti, dalla più nuova.",
+    "allAgents": "Tutti gli agenti",
+    "refresh": "Aggiorna",
+    "loadMore": "Carica altre"
+  },
+  "logs": {
+    "title": "Log agenti",
+    "subtitle": "Informazioni e livelli superiori, caricati dagli agenti a batch.",
+    "allAgents": "Tutti gli agenti",
+    "allLevels": "Tutti i livelli",
+    "levels": {
+      "information": "Informazione",
+      "warning": "Avviso",
+      "error": "Errore"
+    },
+    "refresh": "Aggiorna",
+    "loadMore": "Carica altre"
+  },
+  "admin": {
+    "title": "Gestione utenti break-glass",
+    "subtitle": "Accesso con chiave admin per quando nessun owner riesce ad accedere. La sessione dura 15 minuti e gestisce solo gli utenti.",
+    "closeSession": "Chiudi sessione",
+    "disabled": {
+      "title": "Disabilitato",
+      "body": "Imposta <code>Dupli__Admin__ApiKey</code> sul server e riavvialo per usare questa pagina. Rimuovila di nuovo in seguito."
+    },
+    "form": {
+      "adminKey": "Chiave admin",
+      "openSession": "Apri sessione"
+    }
+  },
+  "storage": {
+    "title": "Storage target",
+    "subtitle": "Endpoint S3 + bucket condiviso dagli agenti. Ogni agente scrive sotto il proprio prefisso con la propria chiave.",
+    "newTarget": "Nuovo storage target",
+    "empty": "Nessuno storage target.",
+    "created": "Storage target {{name}} creato",
+    "form": {
+      "name": "Nome",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "region": "Regione",
+      "optional": "Opzionale",
+      "create": "Crea",
+      "versioningHint": "Abilita il versioning del bucket e una regola di lifecycle per le versioni non correnti lato provider."
+    },
+    "table": {
+      "name": "Nome",
+      "endpoint": "Endpoint",
+      "bucket": "Bucket",
+      "region": "Regione"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "refreshNotice": "Si aggiorna ogni 15 secondi.",
+    "manageAgents": "Gestisci agenti",
+    "counters": {
+      "online": "Online",
+      "offline": "Offline",
+      "pendingEnrollment": "In attesa di registrazione",
+      "backupFailed": "Backup falliti",
+      "backupRunning": "Backup in corso",
+      "openAlerts": "Avvisi aperti"
+    },
+    "agents": {
+      "title": "Agenti",
+      "empty": "Ancora nessun agente.",
+      "createFirst": "Crea il primo.",
+      "idle": "inattivo",
+      "table": {
+        "name": "Nome",
+        "hostname": "Hostname",
+        "status": "Stato",
+        "agent": "Agente",
+        "lastHeartbeat": "Ultimo heartbeat",
+        "lastBackup": "Ultimo backup",
+        "lastRun": "Ultima esecuzione",
+        "activity": "Attività",
+        "alerts": "Avvisi"
+      }
+    }
+  },
+  "agents": {
+    "title": "Agenti",
+    "subtitle": "Un agente per host, ciascuno con il proprio repository restic.",
+    "newAgent": "Nuovo agente",
+    "empty": "Nessun agente.",
+    "noStorageTarget": "Ancora nessuno storage target.",
+    "createStorageFirst": "Creane prima uno.",
+    "form": {
+      "name": "Nome",
+      "storageTarget": "Storage target",
+      "storagePrefix": "Prefisso storage",
+      "storagePrefixHint": "Percorso all'interno del bucket; la chiave S3 dovrebbe essere limitata ad esso.",
+      "s3AccessKeyId": "S3 access key id",
+      "s3SecretAccessKey": "S3 secret access key",
+      "repositoryPassword": "Password del repository",
+      "repositoryPasswordHint": "Opzionale: solo per adottare un repository esistente. Altrimenti generata automaticamente.",
+      "submit": "Crea agente",
+      "secretsNotice": "I segreti sono salvati cifrati sul server e consegnati all'agente in fase di registrazione."
+    },
+    "table": {
+      "name": "Nome",
+      "status": "Stato",
+      "hostname": "Hostname",
+      "agent": "Agente",
+      "storage": "Storage",
+      "lastHeartbeat": "Ultimo heartbeat",
+      "enrolled": "Registrato"
+    }
+  },
+  "releases": {
+    "title": "Release",
+    "subtitle": "Versioni di agent e restic sincronizzate dal server e distribuite via heartbeat.",
+    "makeCurrentCheckbox": "Imposta come corrente",
+    "makeCurrentButton": "Imposta come corrente",
+    "currentBadge": "Corrente",
+    "importForm": {
+      "title": "Importa da GitHub",
+      "description": "Registra le release agent trovate sul tag <code>v&lt;version&gt;</code> del repository configurato (una per piattaforma disponibile).",
+      "versionLabel": "Versione",
+      "channelLabel": "Canale",
+      "submit": "Importa"
+    },
+    "manualForm": {
+      "title": "Registra manualmente",
+      "productLabel": "Prodotto",
+      "versionLabel": "Versione",
+      "platformLabel": "Piattaforma",
+      "channelLabel": "Canale",
+      "sourceUrlLabel": "URL sorgente",
+      "sha256Label": "sha256",
+      "submit": "Registra"
+    },
+    "agentSection": {
+      "title": "Agent",
+      "empty": "Nessuna release agent registrata."
+    },
+    "resticSection": {
+      "title": "restic",
+      "empty": "Nessuna release restic registrata."
+    },
+    "table": {
+      "version": "Versione",
+      "platform": "Piattaforma",
+      "channel": "Canale",
+      "current": "Corrente",
+      "sha256": "sha256",
+      "sourceUrl": "URL sorgente",
+      "created": "Creata"
+    },
+    "toasts": {
+      "imported": "Importate {{count}} release",
+      "registered": "Release {{version}} ({{platform}}) registrata",
+      "nowCurrent": "{{version}} ({{platform}}) è ora la corrente"
+    },
+    "confirmMakeCurrent": {
+      "title": "Impostare {{version}} ({{platform}}) come corrente?",
+      "messageBase": "Diventerà la versione desiderata per gli agenti su questa piattaforma.",
+      "messageWithChannel": "Diventerà la versione desiderata per gli agenti su questa piattaforma e canale {{channel}}."
+    }
+  },
+  "policyEditor": {
+    "breadcrumbAgents": "Agenti",
+    "title": {
+      "edit": "Modifica policy",
+      "new": "Nuova policy"
+    },
+    "deletePolicy": "Elimina policy",
+    "saveChanges": "Salva modifiche",
+    "createPolicy": "Crea policy",
+    "general": {
+      "title": "Generale",
+      "nameLabel": "Nome",
+      "storageTargetLabel": "Storage target",
+      "storageTargetHint": "Per agente: ogni policy di questo agente va allo stesso repository.",
+      "enabledLabel": "Abilitata (pianificata)"
+    },
+    "schedule": {
+      "title": "Pianificazione",
+      "cronLabel": "Cron",
+      "cronHint": "5 campi: minuto ora giorno-del-mese mese giorno-della-settimana. Es. <code>0 2 * * *</code> = ogni giorno alle 02:00.",
+      "timeZoneLabel": "Fuso orario",
+      "nextRuns": "Prossime esecuzioni: {{next}}"
+    },
+    "retention": {
+      "title": "Retention",
+      "dailyLabel": "Snapshot giornalieri",
+      "weeklyLabel": "Snapshot settimanali",
+      "monthlyLabel": "Snapshot mensili",
+      "hint": "Applicata dal job di retention settimanale (restic forget --keep-daily/weekly/monthly, poi prune)."
+    },
+    "sources": {
+      "title": "Sorgenti",
+      "addFolders": "+ Cartelle",
+      "addPostgres": "+ PostgreSQL",
+      "empty": "Aggiungi almeno una sorgente.",
+      "folderType": "Cartelle",
+      "postgresType": "Istanza PostgreSQL",
+      "remove": "Rimuovi",
+      "sourceIdLabel": "ID sorgente",
+      "sourceIdHint": "Chiave stabile usata nel tag restic <code>source=</code>. Cambiarla avvia una nuova cronologia degli snapshot.",
+      "pathsLabel": "Percorsi",
+      "pathsHint": "Uno per riga, es. <code>D:\\Data</code>",
+      "excludesLabel": "Esclusioni",
+      "excludesHint": "Un pattern di esclusione restic per riga (opzionale)",
+      "postgres": {
+        "noConnectionsPrefix": "Questo agente non ha ancora connessioni PostgreSQL. Aggiungine una nella sua",
+        "connectionsTabLink": "scheda Connessioni",
+        "noConnectionsSuffix": ", poi torna qui.",
+        "connectionLabel": "Connessione",
+        "selectConnectionPlaceholder": "Seleziona una connessione…",
+        "connectionHintPrefix": "Host, porta, utente e password (secret) provengono dalle",
+        "connectionsLink": "Connessioni",
+        "databasesLabel": "Database",
+        "allExceptLabel": "Tutti tranne quelli esclusi",
+        "onlyListedLabel": "Solo quelli elencati",
+        "excludeHint": "Esclusi, uno per riga. I template e <code>postgres</code> sono sempre saltati.",
+        "excludedAriaLabel": "Database esclusi",
+        "includeHint": "Inclusi nel backup, uno per riga (<code>postgres</code> consentito). Un database mancante sul server fa fallire il backup.",
+        "includedAriaLabel": "Database inclusi",
+        "includeGlobalsLabel": "Includi ruoli e tablespace (<code>pg_dumpall --globals-only</code>)"
+      }
+    },
+    "toasts": {
+      "saved": "Policy \"{{name}}\" salvata",
+      "deleted": "Policy eliminata"
+    },
+    "confirmDelete": {
+      "title": "Eliminare la policy?",
+      "message": "La policy e la sua cronologia esecuzioni vengono eliminate. Gli snapshot esistenti restano nel repository finché la retention non li rimuove."
+    }
+  },
+  "agentDetail": {
+    "breadcrumb": "Agenti",
+    "notFound": "Agente non trovato.",
+    "actions": {
+      "generateToken": "Genera token di iscrizione",
+      "reEnable": "Riabilita",
+      "deleteAgent": "Elimina agente",
+      "disable": "Disabilita"
+    },
+    "systemJobs": {
+      "RestartAgent": {
+        "label": "Riavvia agente",
+        "confirm": "Il servizio dell'agente si riavvierà non appena riceverà la richiesta (entro 15 minuti)."
+      },
+      "RestoreTest": {
+        "label": "Esegui test di ripristino",
+        "confirm": "Ripristina un campione di file e gli ultimi dump del database in una directory temporanea e li verifica."
+      },
+      "Retention": {
+        "label": "Esegui retention",
+        "confirm": "Applica le regole di retention di ogni policy (restic forget + prune). Gli snapshot vecchi vengono rimossi."
+      },
+      "RepositoryCheck": {
+        "label": "Controlla repository",
+        "confirm": "Esegue restic check leggendo un sottoinsieme dei dati."
+      }
+    },
+    "enrollmentToken": {
+      "title": "Token di iscrizione",
+      "shownOnce": "Mostrato una sola volta. Valido fino a {{expires}}, monouso. Esegui sulla VM come Amministratore:",
+      "copyCommand": "Copia comando",
+      "copyToken": "Copia token",
+      "done": "Fatto"
+    },
+    "deleteForm": {
+      "hint": "Rimuove {{name}} e tutte le sue policy, job, cronologia, log, avvisi, connessioni e notifiche. Il repository nel bucket <strong>non</strong> viene eliminato dal provider di storage.",
+      "confirmPrompt": "Digita \"{{name}}\" per confermare",
+      "deletePermanently": "Elimina definitivamente"
+    },
+    "facts": {
+      "hostname": "Hostname",
+      "os": "OS",
+      "agentVersion": "Versione agente",
+      "resticVersion": "Versione restic",
+      "lastHeartbeat": "Ultimo heartbeat",
+      "lastBackup": "Ultimo backup",
+      "freeDiskSpace": "Spazio disco libero",
+      "enrolled": "Iscritto",
+      "created": "Creato"
+    },
+    "repository": {
+      "title": "Repository",
+      "updateCredentials": "Aggiorna credenziali",
+      "endpointBucket": "Endpoint / bucket",
+      "prefix": "Prefisso",
+      "accessKeyId": "Access key ID",
+      "credentialsStatus": "Stato credenziali",
+      "updatedAt": "— aggiornato {{date}}"
+    },
+    "credentialsForm": {
+      "secretAccessKey": "Secret access key",
+      "skipVerification": "Salta la verifica (non provare a elencare il repository con la nuova chiave)",
+      "revokeHint": "Revoca la vecchia chiave presso il provider di storage solo quando lo stato sopra indica \"{{status}}\"."
+    },
+    "status": {
+      "applied": "Applicata dall'agente",
+      "tooOldForCredentials": "Agente troppo vecchio per gli aggiornamenti automatici delle credenziali",
+      "waitingForAgent": "In attesa che l'agente le applichi"
+    },
+    "tabs": {
+      "policies": "Policy",
+      "connections": "Connessioni",
+      "snapshots": "Snapshot",
+      "jobs": "Job",
+      "history": "Cronologia backup",
+      "restoreTests": "Test di ripristino",
+      "logs": "Log",
+      "alerts": "Avvisi",
+      "updates": "Aggiornamenti"
+    },
+    "policiesTab": {
+      "title": "Policy di backup",
+      "runAll": "Esegui tutte",
+      "newPolicy": "Nuova policy",
+      "empty": "Nessuna policy. Per questo agente non viene ancora eseguito alcun backup.",
+      "runNow": "Esegui ora",
+      "unknownConnection": "connessione sconosciuta",
+      "table": {
+        "name": "Nome",
+        "sources": "Sorgenti",
+        "schedule": "Pianificazione",
+        "nextRun": "Prossima esecuzione",
+        "retention": "Retention",
+        "enabled": "Abilitata"
+      },
+      "sourceType": {
+        "dir": "dir",
+        "pg": "pg"
+      }
+    },
+    "connectionsTab": {
+      "editTitle": "Modifica connessione",
+      "newTitle": "Nuova connessione",
+      "binDirectory": "Directory pg_dump",
+      "binDirectoryHint": "Opzionale. Rilevata automaticamente dal registro se vuota.",
+      "passwordSet": "Impostata",
+      "passwordMissing": "Mancante",
+      "passwordHintEditing": "Solo scrittura: lascia vuoto per mantenere la password attuale.",
+      "passwordHintNew": "Solo scrittura: non verrà più mostrata dopo il salvataggio.",
+      "saveChanges": "Salva modifiche",
+      "addConnection": "Aggiungi connessione",
+      "empty": "Nessuna connessione PostgreSQL. Aggiungine una, poi riferiscila da una sorgente di policy.",
+      "table": {
+        "name": "Nome",
+        "host": "Host",
+        "port": "Porta",
+        "username": "Utente",
+        "password": "Password",
+        "pgDumpDir": "Dir pg_dump"
+      }
+    },
+    "restoreTestsTab": {
+      "empty": "Ancora nessun test di ripristino. Vengono eseguiti settimanalmente, oppure usa \"Esegui test di ripristino\".",
+      "passed": "{{passed}} / {{total}} superati",
+      "hide": "Nascondi",
+      "details": "Dettagli",
+      "table": {
+        "scheduled": "Pianificato",
+        "trigger": "Trigger",
+        "result": "Risultato",
+        "duration": "Durata",
+        "checks": "Controlli",
+        "error": "Errore"
+      }
+    },
+    "loadMore": "Carica altre",
+    "updatesTab": {
+      "platform": "Piattaforma",
+      "launcherManaged": "Gestito dal launcher",
+      "channel": "Canale",
+      "agentVersionRunningDesired": "Versione agente (in uso / desiderata)",
+      "resticVersionRunningDesired": "Versione restic (in uso / desiderata)",
+      "lastUpdate": "Ultimo aggiornamento",
+      "none": "Nessuno",
+      "lastUpdateError": "Errore ultimo aggiornamento",
+      "resticUpdateError": "Errore aggiornamento restic",
+      "updateSettingsTitle": "Impostazioni di aggiornamento",
+      "pinnedAgentVersion": "Versione agente fissata",
+      "pinnedResticVersion": "Versione restic fissata",
+      "noneFollowChannel": "nessuna (segui il canale)"
+    },
+    "toasts": {
+      "copiedToClipboard": "Copiato negli appunti",
+      "clipboardUnavailable": "Appunti non disponibili: seleziona il testo e copialo manualmente",
+      "jobQueued": "{{label}}: in coda",
+      "agentDisabled": "{{name}} disabilitato",
+      "agentPendingEnrollment": "{{name}} è in attesa di iscrizione",
+      "agentDeleted": "{{name}} eliminato",
+      "backupQueued": "Backup \"{{name}}\" messo in coda",
+      "backupsQueuedOne": "{{count}} backup messo in coda",
+      "backupsQueuedOther": "{{count}} backup messi in coda",
+      "nothingToRun": "Niente da eseguire: ogni policy ha già un job in sospeso",
+      "connectionSaved": "Connessione \"{{name}}\" salvata",
+      "connectionDeleted": "Connessione eliminata",
+      "settingsSaved": "Impostazioni di aggiornamento salvate",
+      "credentialsUpdated": "Credenziali di storage aggiornate"
+    },
+    "confirms": {
+      "disableAgentTitle": "Disabilitare {{name}}?",
+      "disableAgentBody": "L'agente non potrà più autenticarsi e non verrà pianificato alcun job. Per riabilitarlo serve un nuovo token di iscrizione.",
+      "enableAgentTitle": "Riabilitare {{name}}?",
+      "enableAgentBody": "L'agente torna in stato Pending: genera un nuovo token di iscrizione ed esegui di nuovo il comando di installazione sulla VM.",
+      "cancelJobTitle": "Annullare il job?",
+      "cancelJobBody": "Il job {{type}} verrà annullato.",
+      "cancelJobConfirm": "Annulla job",
+      "deleteConnectionTitle": "Eliminare la connessione \"{{name}}\"?",
+      "deleteConnectionBody": "Fallisce se una sorgente di policy la usa ancora per i backup PostgreSQL."
+    }
+  },
+  "status": {
+    "Succeeded": "Riuscito",
+    "Active": "Attivo",
+    "Online": "Online",
+    "SucceededWithWarnings": "Avvisi",
+    "Pending": "In attesa",
+    "Assigned": "Assegnato",
+    "Running": "In corso",
+    "Failed": "Fallito",
+    "TimedOut": "Scaduto",
+    "Interrupted": "Interrotto",
+    "Missed": "Mancato",
+    "Offline": "Offline",
+    "Cancelled": "Annullato",
+    "Disabled": "Disabilitato",
+    "Error": "Errore",
+    "Fatal": "Critico",
+    "Warning": "Avviso",
+    "Information": "Info",
+    "Open": "Aperto",
+    "Resolved": "Risolto",
+    "RolledBack": "Ripristinato",
+    "Up to date": "Aggiornato",
+    "Update available": "Aggiornamento disponibile",
+    "Update failed": "Aggiornamento fallito",
+    "No launcher": "Nessun launcher",
+    "Invited": "Invitato"
+  },
+  "operatorUsers": {
+    "invite": {
+      "title": "Invita",
+      "emailLabel": "Email",
+      "emailHint": "Email o UPN Entra ID. Associato all'account al primo accesso.",
+      "roleLabel": "Ruolo",
+      "submit": "Invita",
+      "noEmailSent": "Non viene inviata alcuna email: dì alla persona di aprire Dupli e accedere con quell'account."
+    },
+    "empty": "Nessun utente.",
+    "table": {
+      "user": "Utente",
+      "role": "Ruolo",
+      "status": "Stato",
+      "lastSignIn": "Ultimo accesso",
+      "updated": "Aggiornato"
+    },
+    "roles": {
+      "Viewer": "Viewer",
+      "Operator": "Operator",
+      "Owner": "Owner"
+    },
+    "roleOfAriaLabel": "Ruolo di {{email}}",
+    "notifications": "Notifiche",
+    "enable": "Abilita",
+    "disable": "Disabilita",
+    "toasts": {
+      "invited": "{{email}} invitato come {{role}}",
+      "roleChanged": "{{email}} ora è {{role}}"
+    },
+    "confirmDisable": {
+      "title": "Disabilita utente",
+      "message": "{{email}} perde l'accesso immediatamente, incluse le sessioni aperte."
+    },
+    "confirmDelete": {
+      "title": "Elimina utente",
+      "boundMessage": "{{email}} ha già effettuato l'accesso. Eliminandolo si rimuove l'associazione all'account; disabilitandolo si mantiene.",
+      "invitationMessage": "L'invito per {{email}} verrà rimosso."
+    }
+  },
+  "tables": {
+    "jobs": {
+      "empty": "Nessun job.",
+      "type": "Tipo",
+      "agent": "Agente",
+      "policy": "Policy",
+      "trigger": "Trigger",
+      "state": "Stato",
+      "scheduled": "Pianificato",
+      "duration": "Durata",
+      "error": "Errore",
+      "cancelling": "annullamento…"
+    },
+    "items": {
+      "empty": "Nessun risultato per gli elementi.",
+      "source": "Sorgente",
+      "item": "Elemento",
+      "outcome": "Esito",
+      "snapshot": "Snapshot",
+      "bytes": "Byte",
+      "details": "Dettagli"
+    },
+    "runs": {
+      "empty": "Ancora nessuna esecuzione di backup.",
+      "completed": "Completato",
+      "agent": "Agente",
+      "policy": "Policy",
+      "status": "Stato",
+      "duration": "Durata",
+      "processed": "Elaborati",
+      "added": "Aggiunti",
+      "error": "Errore",
+      "hide": "Nascondi",
+      "items": "Elementi ({{count}})"
+    },
+    "logs": {
+      "empty": "Nessuna voce di log.",
+      "time": "Ora",
+      "agent": "Agente",
+      "level": "Livello",
+      "message": "Messaggio"
+    },
+    "alerts": {
+      "empty": "Nessun avviso. Tutto ok.",
+      "status": "Stato",
+      "kind": "Tipo",
+      "agent": "Agente",
+      "policy": "Policy",
+      "message": "Messaggio",
+      "opened": "Aperto",
+      "resolved": "Risolto"
+    }
+  },
+  "jobType": {
+    "Backup": "Backup",
+    "Restore": "Ripristino",
+    "RestoreTest": "Test di ripristino",
+    "RepositoryCheck": "Controllo repository",
+    "Retention": "Retention",
+    "RestartAgent": "Riavvio agente",
+    "AgentUpdate": "Aggiornamento agente",
+    "ResticUpdate": "Aggiornamento restic"
+  },
+  "jobTrigger": {
+    "Schedule": "Pianificato",
+    "Manual": "Manuale",
+    "System": "Sistema"
+  },
+  "snapshotBrowser": {
+    "policyAriaLabel": "Policy",
+    "allPolicies": "Tutte le policy",
+    "typeAriaLabel": "Tipo",
+    "allTypes": "Tutti i tipi",
+    "folders": "Cartelle",
+    "refresh": "Aggiorna",
+    "readingRepository": "Lettura del repository…",
+    "empty": "Nessuno snapshot.",
+    "table": {
+      "time": "Ora",
+      "policy": "Policy",
+      "source": "Sorgente",
+      "content": "Contenuto",
+      "snapshot": "Snapshot",
+      "name": "Nome",
+      "size": "Dimensione",
+      "modified": "Modificato"
+    },
+    "deletedPolicy": "policy eliminata",
+    "rolesAndTablespaces": "ruoli e tablespace",
+    "database": "database {{name}}",
+    "restore": "Ripristina",
+    "browse": "Sfoglia",
+    "backToSnapshots": "← Snapshot",
+    "snapshotLabel": "Snapshot",
+    "pathAriaLabel": "Percorso",
+    "emptyDirectory": "Cartella vuota.",
+    "selectAll": "Seleziona tutto",
+    "selectNodeAriaLabel": "Seleziona {{name}}",
+    "wholeSnapshot": "Intero snapshot.",
+    "selectedCount": "{{count}} selezionati:",
+    "clear": "pulisci",
+    "form": {
+      "targetDirectory": "Cartella di destinazione sulla VM",
+      "targetDirectoryPlaceholder": "Predefinita: C:\\DupliRestore\\<job id>",
+      "targetDirectoryHint": "Deve essere nuova o vuota e fuori da ogni percorso di backup. I dati di produzione non vengono mai sovrascritti.",
+      "alsoLoadDump": "Carica anche il dump in un nuovo database (<code>pg_restore</code>)",
+      "targetConnection": "Connessione di destinazione",
+      "selectConnection": "Seleziona una connessione…",
+      "newDatabaseName": "Nome nuovo database",
+      "newDatabaseHint": "Creato su {{connection}}; il ripristino fallisce se esiste già.",
+      "confirmNameLabel": "Digita di nuovo il nome per confermare"
+    },
+    "cannotReadRepository": "Impossibile leggere il repository: {{error}}",
+    "cannotReadFolder": "Impossibile leggere questa cartella: {{error}}",
+    "theSelectedConnection": "la connessione selezionata",
+    "confirmRestore": {
+      "wholeSnapshot": "l'intero snapshot",
+      "items": "{{count}} elemento/i",
+      "message": "Ripristina {{what}} di {{shortId}} su {{where}} sulla VM.",
+      "andDatabase": " Poi crea il database \"{{newDatabase}}\" e vi carica il dump.",
+      "title": "Ripristinare?"
+    },
+    "restoreQueued": "Ripristino in coda: l'agente lo prende in carico al prossimo poll"
+  }
+}

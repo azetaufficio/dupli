@@ -17,6 +17,7 @@ import {
   Job,
   JobState,
   JobType,
+  Language,
   LogEntry,
   NotificationPreference,
   OperatorNotification,
@@ -345,5 +346,9 @@ export class ApiService {
     request: NotificationPreference[],
   ): Observable<NotificationPreference[]> {
     return this.http.put<NotificationPreference[]>('/api/me/notification-preferences', request);
+  }
+
+  setMyLanguage(language: Language): Observable<void> {
+    return this.http.put<void>('/api/me/language', { language });
   }
 }

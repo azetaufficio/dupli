@@ -1,6 +1,7 @@
 import { httpResource } from '@angular/common/http';
 import { Component, DestroyRef, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { TranslocoModule } from '@jsverse/transloco';
 import { Dashboard } from '../core/models';
 import { agentUpdateStatus } from '../shared/agent-update-status';
 import { Badge } from '../shared/badge';
@@ -10,15 +11,15 @@ const REFRESH_MS = 15_000;
 
 @Component({
   selector: 'app-dashboard',
-  imports: [Badge, DateTimePipe, RelativeTimePipe, RouterLink],
+  imports: [Badge, DateTimePipe, RelativeTimePipe, RouterLink, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Dashboard</h1>
-        <p class="muted">Refreshes every 15 seconds.</p>
+        <h1>{{ 'dashboard.title' | transloco }}</h1>
+        <p class="muted">{{ 'dashboard.refreshNotice' | transloco }}</p>
       </div>
       <div class="toolbar">
-        <a class="btn" routerLink="/agents">Manage agents</a>
+        <a class="btn" routerLink="/agents">{{ 'dashboard.manageAgents' | transloco }}</a>
       </div>
     </div>
 
@@ -26,23 +27,23 @@ const REFRESH_MS = 15_000;
       <div class="grid counters">
         <div class="counter ok">
           <div class="value">{{ d.counters.online }}</div>
-          <div class="label">Online</div>
+          <div class="label">{{ 'dashboard.counters.online' | transloco }}</div>
         </div>
         <div class="counter" [class.bad]="d.counters.offline > 0">
           <div class="value">{{ d.counters.offline }}</div>
-          <div class="label">Offline</div>
+          <div class="label">{{ 'dashboard.counters.offline' | transloco }}</div>
         </div>
         <div class="counter" [class.warn]="d.counters.pending > 0">
           <div class="value">{{ d.counters.pending }}</div>
-          <div class="label">Pending enrollment</div>
+          <div class="label">{{ 'dashboard.counters.pendingEnrollment' | transloco }}</div>
         </div>
         <div class="counter" [class.bad]="d.counters.backupFailed > 0">
           <div class="value">{{ d.counters.backupFailed }}</div>
-          <div class="label">Backup failed</div>
+          <div class="label">{{ 'dashboard.counters.backupFailed' | transloco }}</div>
         </div>
         <div class="counter info">
           <div class="value">{{ d.counters.backupRunning }}</div>
-          <div class="label">Backup running</div>
+          <div class="label">{{ 'dashboard.counters.backupRunning' | transloco }}</div>
         </div>
         <a
           class="counter"
@@ -51,29 +52,32 @@ const REFRESH_MS = 15_000;
           style="text-decoration: none; color: inherit"
         >
           <div class="value">{{ d.counters.openAlerts }}</div>
-          <div class="label">Open alerts</div>
+          <div class="label">{{ 'dashboard.counters.openAlerts' | transloco }}</div>
         </a>
       </div>
 
       <section class="card flush">
-        <div class="card-header"><h2>Agents</h2></div>
+        <div class="card-header"><h2>{{ 'dashboard.agents.title' | transloco }}</h2></div>
         @if (d.agents.length === 0) {
-          <div class="empty">No agents yet. <a routerLink="/agents">Create the first one.</a></div>
+          <div class="empty">
+            {{ 'dashboard.agents.empty' | transloco }}
+            <a routerLink="/agents">{{ 'dashboard.agents.createFirst' | transloco }}</a>
+          </div>
         } @else {
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Hostname</th>
-                  <th>Status</th>
-                  <th>Agent</th>
+                  <th>{{ 'dashboard.agents.table.name' | transloco }}</th>
+                  <th>{{ 'dashboard.agents.table.hostname' | transloco }}</th>
+                  <th>{{ 'dashboard.agents.table.status' | transloco }}</th>
+                  <th>{{ 'dashboard.agents.table.agent' | transloco }}</th>
                   <th>restic</th>
-                  <th>Last heartbeat</th>
-                  <th>Last backup</th>
-                  <th>Last run</th>
-                  <th>Activity</th>
-                  <th class="num">Alerts</th>
+                  <th>{{ 'dashboard.agents.table.lastHeartbeat' | transloco }}</th>
+                  <th>{{ 'dashboard.agents.table.lastBackup' | transloco }}</th>
+                  <th>{{ 'dashboard.agents.table.lastRun' | transloco }}</th>
+                  <th>{{ 'dashboard.agents.table.activity' | transloco }}</th>
+                  <th class="num">{{ 'dashboard.agents.table.alerts' | transloco }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -112,7 +116,7 @@ const REFRESH_MS = 15_000;
                       @if (row.runningJob) {
                         <app-badge value="Running" [text]="row.runningJob" />
                       } @else {
-                        <span class="muted">idle</span>
+                        <span class="muted">{{ 'dashboard.agents.idle' | transloco }}</span>
                       }
                     </td>
                     <td class="num">
@@ -130,7 +134,7 @@ const REFRESH_MS = 15_000;
         }
       </section>
     } @else if (dashboard.isLoading()) {
-      <p class="muted">Loading…</p>
+      <p class="muted">{{ 'common.loading' | transloco }}</p>
     }
   `,
 })

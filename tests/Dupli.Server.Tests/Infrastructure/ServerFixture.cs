@@ -279,7 +279,7 @@ public static class DupliTestServerExtensions
         };
         db.OperatorUsers.Add(user);
         await db.SaveChangesAsync();
-        return new OperatorUserDto(user.Id, user.Email, user.Role, user.DisplayName, true, null, null, user.CreatedAt, user.CreatedBy, user.UpdatedAt, user.UpdatedBy);
+        return new OperatorUserDto(user.Id, user.Email, user.Role, user.DisplayName, user.Language, true, null, null, user.CreatedAt, user.CreatedBy, user.UpdatedAt, user.UpdatedBy);
     }
 
     public static async Task<EnrolledAgent> EnrollAsync(this DupliTestServer server, string name = "vm-01", string machineId = "machine-1")

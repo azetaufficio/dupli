@@ -1,5 +1,6 @@
 import { Component, inject, input, output, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { TranslocoModule } from '@jsverse/transloco';
 import { AuthService } from '../core/auth.service';
 import { Alert, Job, LogEntry, Run, TERMINAL_STATES } from '../core/models';
 import { Badge } from './badge';
@@ -10,43 +11,43 @@ export type NameLookup = Record<string, string>;
 
 @Component({
   selector: 'app-jobs-table',
-  imports: [Badge, DateTimePipe, DurationPipe, RouterLink],
+  imports: [Badge, DateTimePipe, DurationPipe, RouterLink, TranslocoModule],
   template: `
     @if (jobs().length === 0) {
-      <div class="empty">No jobs.</div>
+      <div class="empty">{{ 'tables.jobs.empty' | transloco }}</div>
     } @else {
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Type</th>
+              <th>{{ 'tables.jobs.type' | transloco }}</th>
               @if (showAgent()) {
-                <th>Agent</th>
+                <th>{{ 'tables.jobs.agent' | transloco }}</th>
               }
-              <th>Policy</th>
-              <th>Trigger</th>
-              <th>State</th>
-              <th>Scheduled</th>
-              <th>Duration</th>
-              <th>Error</th>
+              <th>{{ 'tables.jobs.policy' | transloco }}</th>
+              <th>{{ 'tables.jobs.trigger' | transloco }}</th>
+              <th>{{ 'tables.jobs.state' | transloco }}</th>
+              <th>{{ 'tables.jobs.scheduled' | transloco }}</th>
+              <th>{{ 'tables.jobs.duration' | transloco }}</th>
+              <th>{{ 'tables.jobs.error' | transloco }}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             @for (job of jobs(); track job.id) {
               <tr>
-                <td class="nowrap">{{ job.type }}</td>
+                <td class="nowrap">{{ 'jobType.' + job.type | transloco }}</td>
                 @if (showAgent()) {
                   <td>
                     <a [routerLink]="['/agents', job.agentId]">{{ job.agentName }}</a>
                   </td>
                 }
                 <td>{{ job.policyName ?? '—' }}</td>
-                <td>{{ job.trigger }}</td>
+                <td>{{ 'jobTrigger.' + job.trigger | transloco }}</td>
                 <td>
                   <app-badge [value]="job.state" />
                   @if (job.cancelRequested && !isTerminal(job)) {
-                    <span class="muted"> cancelling…</span>
+                    <span class="muted"> {{ 'tables.jobs.cancelling' | transloco }}</span>
                   }
                 </td>
                 <td class="nowrap">{{ job.scheduledAt | datetime }}</td>
@@ -55,7 +56,7 @@ export type NameLookup = Record<string, string>;
                 <td class="num">
                   @if (!isTerminal(job) && !job.cancelRequested && auth.canOperate()) {
                     <button type="button" class="btn small danger" (click)="cancel.emit(job)">
-                      Cancel
+                      {{ 'common.cancel' | transloco }}
                     </button>
                   }
                 </td>
@@ -80,20 +81,20 @@ export class JobsTable {
 
 @Component({
   selector: 'app-items-table',
-  imports: [Badge, BytesPipe],
+  imports: [Badge, BytesPipe, TranslocoModule],
   template: `
     @if (items().length === 0) {
-      <span class="muted">No item results.</span>
+      <span class="muted">{{ 'tables.items.empty' | transloco }}</span>
     } @else {
       <table>
         <thead>
           <tr>
-            <th>Source</th>
-            <th>Item</th>
-            <th>Outcome</th>
-            <th>Snapshot</th>
-            <th class="num">Bytes</th>
-            <th>Details</th>
+            <th>{{ 'tables.items.source' | transloco }}</th>
+            <th>{{ 'tables.items.item' | transloco }}</th>
+            <th>{{ 'tables.items.outcome' | transloco }}</th>
+            <th>{{ 'tables.items.snapshot' | transloco }}</th>
+            <th class="num">{{ 'tables.items.bytes' | transloco }}</th>
+            <th>{{ 'tables.items.details' | transloco }}</th>
           </tr>
         </thead>
         <tbody>
@@ -126,25 +127,25 @@ export class ItemsTable {
 
 @Component({
   selector: 'app-runs-table',
-  imports: [Badge, BytesPipe, DateTimePipe, DurationPipe, ItemsTable, RouterLink],
+  imports: [Badge, BytesPipe, DateTimePipe, DurationPipe, ItemsTable, RouterLink, TranslocoModule],
   template: `
     @if (runs().length === 0) {
-      <div class="empty">No backup runs yet.</div>
+      <div class="empty">{{ 'tables.runs.empty' | transloco }}</div>
     } @else {
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Completed</th>
+              <th>{{ 'tables.runs.completed' | transloco }}</th>
               @if (showAgent()) {
-                <th>Agent</th>
+                <th>{{ 'tables.runs.agent' | transloco }}</th>
               }
-              <th>Policy</th>
-              <th>Status</th>
-              <th>Duration</th>
-              <th class="num">Processed</th>
-              <th class="num">Added</th>
-              <th>Error</th>
+              <th>{{ 'tables.runs.policy' | transloco }}</th>
+              <th>{{ 'tables.runs.status' | transloco }}</th>
+              <th>{{ 'tables.runs.duration' | transloco }}</th>
+              <th class="num">{{ 'tables.runs.processed' | transloco }}</th>
+              <th class="num">{{ 'tables.runs.added' | transloco }}</th>
+              <th>{{ 'tables.runs.error' | transloco }}</th>
               <th></th>
             </tr>
           </thead>
@@ -165,7 +166,11 @@ export class ItemsTable {
                 <td class="muted">{{ run.errorMessage }}</td>
                 <td class="num">
                   <button type="button" class="link" (click)="toggle(run.id)">
-                    {{ expanded() === run.id ? 'Hide' : 'Items (' + run.items.length + ')' }}
+                    {{
+                      expanded() === run.id
+                        ? ('tables.runs.hide' | transloco)
+                        : ('tables.runs.items' | transloco: { count: run.items.length })
+                    }}
                   </button>
                 </td>
               </tr>
@@ -195,21 +200,21 @@ export class RunsTable {
 
 @Component({
   selector: 'app-logs-table',
-  imports: [Badge, DateTimePipe, RouterLink],
+  imports: [Badge, DateTimePipe, RouterLink, TranslocoModule],
   template: `
     @if (logs().length === 0) {
-      <div class="empty">No log entries.</div>
+      <div class="empty">{{ 'tables.logs.empty' | transloco }}</div>
     } @else {
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Time</th>
+              <th>{{ 'tables.logs.time' | transloco }}</th>
               @if (showAgent()) {
-                <th>Agent</th>
+                <th>{{ 'tables.logs.agent' | transloco }}</th>
               }
-              <th>Level</th>
-              <th>Message</th>
+              <th>{{ 'tables.logs.level' | transloco }}</th>
+              <th>{{ 'tables.logs.message' | transloco }}</th>
             </tr>
           </thead>
           <tbody>
@@ -243,31 +248,31 @@ export class LogsTable {
 
 @Component({
   selector: 'app-alerts-table',
-  imports: [Badge, DateTimePipe, RelativeTimePipe, RouterLink],
+  imports: [Badge, DateTimePipe, RelativeTimePipe, RouterLink, TranslocoModule],
   template: `
     @if (alerts().length === 0) {
-      <div class="empty">No alerts. All good.</div>
+      <div class="empty">{{ 'tables.alerts.empty' | transloco }}</div>
     } @else {
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Kind</th>
+              <th>{{ 'tables.alerts.status' | transloco }}</th>
+              <th>{{ 'tables.alerts.kind' | transloco }}</th>
               @if (showAgent()) {
-                <th>Agent</th>
+                <th>{{ 'tables.alerts.agent' | transloco }}</th>
               }
-              <th>Policy</th>
-              <th>Message</th>
-              <th>Opened</th>
-              <th>Resolved</th>
+              <th>{{ 'tables.alerts.policy' | transloco }}</th>
+              <th>{{ 'tables.alerts.message' | transloco }}</th>
+              <th>{{ 'tables.alerts.opened' | transloco }}</th>
+              <th>{{ 'tables.alerts.resolved' | transloco }}</th>
             </tr>
           </thead>
           <tbody>
             @for (alert of alerts(); track alert.id) {
               <tr>
                 <td><app-badge [value]="alert.resolvedAt ? 'Resolved' : 'Open'" /></td>
-                <td class="nowrap">{{ kindLabel(alert) }}</td>
+                <td class="nowrap">{{ 'alertKind.' + alert.kind + '.label' | transloco }}</td>
                 @if (showAgent()) {
                   <td class="nowrap">
                     @if (alert.agentId) {
@@ -292,10 +297,6 @@ export class LogsTable {
 export class AlertsTable {
   readonly alerts = input.required<Alert[]>();
   readonly showAgent = input(false);
-
-  protected kindLabel(alert: Alert): string {
-    return alert.kind.replace(/([a-z])([A-Z])/g, '$1 $2');
-  }
 }
 
 /** Builds an id → name lookup for the tables. */

@@ -1,6 +1,7 @@
 import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
@@ -34,45 +35,49 @@ export function toResticTreePath(rawPath: string): string {
  */
 @Component({
   selector: 'app-snapshot-browser',
-  imports: [FormsModule, BytesPipe, DateTimePipe],
+  imports: [FormsModule, BytesPipe, DateTimePipe, TranslocoModule],
   template: `
     @if (!selected()) {
       <div class="toolbar">
         <select
           [ngModel]="policyFilter()"
           (ngModelChange)="policyFilter.set($event)"
-          aria-label="Policy"
+          [attr.aria-label]="'snapshotBrowser.policyAriaLabel' | transloco"
         >
-          <option value="">All policies</option>
+          <option value="">{{ 'snapshotBrowser.allPolicies' | transloco }}</option>
           @for (p of policyOptions(); track p.id) {
             <option [value]="p.id">{{ p.name }}</option>
           }
         </select>
-        <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event)" aria-label="Type">
-          <option value="">All types</option>
-          <option value="dir">Folders</option>
+        <select
+          [ngModel]="typeFilter()"
+          (ngModelChange)="typeFilter.set($event)"
+          [attr.aria-label]="'snapshotBrowser.typeAriaLabel' | transloco"
+        >
+          <option value="">{{ 'snapshotBrowser.allTypes' | transloco }}</option>
+          <option value="dir">{{ 'snapshotBrowser.folders' | transloco }}</option>
           <option value="pg">PostgreSQL</option>
         </select>
         <button type="button" class="btn" (click)="load(true)" [disabled]="loading()">
-          Refresh
+          {{ 'snapshotBrowser.refresh' | transloco }}
         </button>
       </div>
       @if (loading() && snapshots().length === 0) {
-        <p class="muted">Reading the repository…</p>
+        <p class="muted">{{ 'snapshotBrowser.readingRepository' | transloco }}</p>
       } @else if (loadError()) {
         <p class="error-box">{{ loadError() }}</p>
       } @else if (filtered().length === 0) {
-        <div class="empty">No snapshots.</div>
+        <div class="empty">{{ 'snapshotBrowser.empty' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Policy</th>
-                <th>Source</th>
-                <th>Content</th>
-                <th>Snapshot</th>
+                <th>{{ 'snapshotBrowser.table.time' | transloco }}</th>
+                <th>{{ 'snapshotBrowser.table.policy' | transloco }}</th>
+                <th>{{ 'snapshotBrowser.table.source' | transloco }}</th>
+                <th>{{ 'snapshotBrowser.table.content' | transloco }}</th>
+                <th>{{ 'snapshotBrowser.table.snapshot' | transloco }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -80,12 +85,19 @@ export function toResticTreePath(rawPath: string): string {
               @for (s of filtered(); track s.id) {
                 <tr>
                   <td class="nowrap">{{ s.time | datetime }}</td>
-                  <td>{{ s.policyName ?? (s.policyId ? 'deleted policy' : '—') }}</td>
+                  <td>
+                    {{
+                      s.policyName ??
+                        (s.policyId ? ('snapshotBrowser.deletedPolicy' | transloco) : '—')
+                    }}
+                  </td>
                   <td>{{ s.sourceId ?? '—' }}</td>
                   <td class="mono">
                     @if (s.type === 'pg') {
                       {{
-                        s.database === globals ? 'roles and tablespaces' : 'database ' + s.database
+                        s.database === globals
+                          ? ('snapshotBrowser.rolesAndTablespaces' | transloco)
+                          : ('snapshotBrowser.database' | transloco: { name: s.database })
                       }}
                     } @else {
                       {{ s.paths.join(', ') }}
@@ -95,7 +107,11 @@ export function toResticTreePath(rawPath: string): string {
                   <td class="num">
                     @if (auth.canOperate()) {
                       <button type="button" class="btn small" (click)="open(s)">
-                        {{ s.type === 'pg' ? 'Restore' : 'Browse' }}
+                        {{
+                          s.type === 'pg'
+                            ? ('snapshotBrowser.restore' | transloco)
+                            : ('snapshotBrowser.browse' | transloco)
+                        }}
                       </button>
                     }
                   </td>
@@ -108,16 +124,19 @@ export function toResticTreePath(rawPath: string): string {
     } @else {
       @let s = selected()!;
       <div class="toolbar">
-        <button type="button" class="btn" (click)="close()">← Snapshots</button>
+        <button type="button" class="btn" (click)="close()">
+          {{ 'snapshotBrowser.backToSnapshots' | transloco }}
+        </button>
         <span class="muted"
-          >Snapshot <span class="mono">{{ s.shortId }}</span> — {{ s.time | datetime }}
+          >{{ 'snapshotBrowser.snapshotLabel' | transloco }}
+          <span class="mono">{{ s.shortId }}</span> — {{ s.time | datetime }}
           @if (s.policyName) {
             — {{ s.policyName }} / {{ s.sourceId }}
           }
         </span>
       </div>
 
-      <nav class="crumbs" aria-label="Path">
+      <nav class="crumbs" [attr.aria-label]="'snapshotBrowser.pathAriaLabel' | transloco">
         <button type="button" class="link" (click)="browse('/')">/</button>
         @for (c of pathCrumbs(); track c.path) {
           @if (!$first) {
@@ -128,11 +147,11 @@ export function toResticTreePath(rawPath: string): string {
       </nav>
 
       @if (treeLoading()) {
-        <p class="muted">Loading…</p>
+        <p class="muted">{{ 'common.loading' | transloco }}</p>
       } @else if (treeError()) {
         <p class="error-box">{{ treeError() }}</p>
       } @else if (nodes().length === 0) {
-        <div class="empty">Empty directory.</div>
+        <div class="empty">{{ 'snapshotBrowser.emptyDirectory' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
@@ -141,14 +160,14 @@ export function toResticTreePath(rawPath: string): string {
                 <th class="check-col">
                   <input
                     type="checkbox"
-                    aria-label="Select all"
+                    [attr.aria-label]="'snapshotBrowser.selectAll' | transloco"
                     [checked]="allSelected()"
                     (change)="toggleAll()"
                   />
                 </th>
-                <th>Name</th>
-                <th class="num">Size</th>
-                <th>Modified</th>
+                <th>{{ 'snapshotBrowser.table.name' | transloco }}</th>
+                <th class="num">{{ 'snapshotBrowser.table.size' | transloco }}</th>
+                <th>{{ 'snapshotBrowser.table.modified' | transloco }}</th>
               </tr>
             </thead>
             <tbody>
@@ -157,7 +176,9 @@ export function toResticTreePath(rawPath: string): string {
                   <td class="check-col">
                     <input
                       type="checkbox"
-                      [attr.aria-label]="'Select ' + n.name"
+                      [attr.aria-label]="
+                        'snapshotBrowser.selectNodeAriaLabel' | transloco: { name: n.name }
+                      "
                       [checked]="isSelected(n.path)"
                       [disabled]="coveredByParent(n.path)"
                       (change)="toggle(n.path)"
@@ -182,58 +203,59 @@ export function toResticTreePath(rawPath: string): string {
       }
 
       <section class="card form restore-form">
-        <h2>Restore</h2>
+        <h2>{{ 'snapshotBrowser.restore' | transloco }}</h2>
         <p class="muted">
           @if (selection().length === 0) {
-            Whole snapshot.
+            {{ 'snapshotBrowser.wholeSnapshot' | transloco }}
           } @else {
-            {{ selection().length }} selected:
+            {{ 'snapshotBrowser.selectedCount' | transloco: { count: selection().length } }}
             <span class="mono">{{ selection().join(', ') }}</span>
-            <button type="button" class="link clear" (click)="selection.set([])">clear</button>
+            <button type="button" class="link clear" (click)="selection.set([])">
+              {{ 'snapshotBrowser.clear' | transloco }}
+            </button>
           }
         </p>
         <label class="field">
-          Target directory on the VM
+          {{ 'snapshotBrowser.form.targetDirectory' | transloco }}
           <input
             name="target"
             [(ngModel)]="targetDirectory"
-            placeholder="Default: C:\\DupliRestore\\<job id>"
+            [placeholder]="'snapshotBrowser.form.targetDirectoryPlaceholder' | transloco"
           />
-          <span class="hint"
-            >Must be new or empty and outside every backed-up path. Production data is never
-            overwritten.</span
-          >
+          <span class="hint">{{ 'snapshotBrowser.form.targetDirectoryHint' | transloco }}</span>
         </label>
         @if (canRestoreDatabase()) {
           <label class="check">
             <input type="checkbox" name="toDb" [(ngModel)]="toDatabase" />
-            Also load the dump into a new database (<code>pg_restore</code>)
+            <span [innerHTML]="'snapshotBrowser.form.alsoLoadDump' | transloco"></span>
           </label>
           @if (toDatabase) {
             <div class="form-row">
               <label class="field">
-                Target connection
+                {{ 'snapshotBrowser.form.targetConnection' | transloco }}
                 <select name="targetConnection" [(ngModel)]="targetConnectionId">
-                  <option value="" disabled>Select a connection…</option>
+                  <option value="" disabled>
+                    {{ 'snapshotBrowser.form.selectConnection' | transloco }}
+                  </option>
                   @for (c of connections(); track c.id) {
                     <option [value]="c.id">{{ c.name }}</option>
                   }
                 </select>
               </label>
               <label class="field">
-                New database name
+                {{ 'snapshotBrowser.form.newDatabaseName' | transloco }}
                 <input
                   name="newDb"
                   [(ngModel)]="newDatabase"
                   [placeholder]="s.database + '_restore'"
                 />
-                <span class="hint"
-                  >Created on {{ connectionName(targetConnectionId) }}; the restore fails if it
-                  already exists.</span
-                >
+                <span class="hint">{{
+                  'snapshotBrowser.form.newDatabaseHint'
+                    | transloco: { connection: connectionName(targetConnectionId) }
+                }}</span>
               </label>
               <label class="field">
-                Type the name again to confirm
+                {{ 'snapshotBrowser.form.confirmNameLabel' | transloco }}
                 <input name="newDbConfirm" [(ngModel)]="newDatabaseConfirm" autocomplete="off" />
               </label>
             </div>
@@ -246,7 +268,7 @@ export function toResticTreePath(rawPath: string): string {
             (click)="restore(s)"
             [disabled]="submitting() || !databaseConfirmed()"
           >
-            Restore
+            {{ 'snapshotBrowser.restore' | transloco }}
           </button>
         </div>
       </section>
@@ -284,6 +306,7 @@ export class SnapshotBrowser {
   private readonly api = inject(ApiService);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly globals = GLOBALS;
   protected readonly snapshots = signal<Snapshot[]>([]);
@@ -351,7 +374,11 @@ export class SnapshotBrowser {
         this.loading.set(false);
       },
       error: (err: unknown) => {
-        this.loadError.set(`Cannot read the repository: ${problemMessage(err)}`);
+        this.loadError.set(
+          this.transloco.translate('snapshotBrowser.cannotReadRepository', {
+            error: problemMessage(err),
+          }),
+        );
         this.loading.set(false);
       },
     });
@@ -370,7 +397,10 @@ export class SnapshotBrowser {
   }
 
   protected connectionName(id: string): string {
-    return this.connections().find((c) => c.id === id)?.name ?? 'the selected connection';
+    return (
+      this.connections().find((c) => c.id === id)?.name ??
+      this.transloco.translate('snapshotBrowser.theSelectedConnection')
+    );
   }
 
   protected close(): void {
@@ -391,7 +421,11 @@ export class SnapshotBrowser {
         this.treeLoading.set(false);
       },
       error: (err: unknown) => {
-        this.treeError.set(`Cannot read this folder: ${problemMessage(err)}`);
+        this.treeError.set(
+          this.transloco.translate('snapshotBrowser.cannotReadFolder', {
+            error: problemMessage(err),
+          }),
+        );
         this.treeLoading.set(false);
       },
     });
@@ -438,12 +472,27 @@ export class SnapshotBrowser {
   protected async restore(s: Snapshot): Promise<void> {
     const newDatabase = this.toDatabase ? this.newDatabase.trim() : null;
     const what =
-      this.selection().length === 0 ? 'the whole snapshot' : `${this.selection().length} item(s)`;
+      this.selection().length === 0
+        ? this.transloco.translate('snapshotBrowser.confirmRestore.wholeSnapshot')
+        : this.transloco.translate('snapshotBrowser.confirmRestore.items', {
+            count: this.selection().length,
+          });
     const where = this.targetDirectory.trim() || 'C:\\DupliRestore\\<job id>';
     const message =
-      `Restores ${what} of ${s.shortId} to ${where} on the VM.` +
-      (newDatabase ? ` Then creates database "${newDatabase}" and loads the dump into it.` : '');
-    if (!(await this.confirm.ask('Restore?', message, { confirmLabel: 'Restore' }))) return;
+      this.transloco.translate('snapshotBrowser.confirmRestore.message', {
+        what,
+        shortId: s.shortId,
+        where,
+      }) +
+      (newDatabase
+        ? this.transloco.translate('snapshotBrowser.confirmRestore.andDatabase', { newDatabase })
+        : '');
+    if (
+      !(await this.confirm.ask(this.transloco.translate('snapshotBrowser.confirmRestore.title'), message, {
+        confirmLabel: this.transloco.translate('snapshotBrowser.restore'),
+      }))
+    )
+      return;
 
     this.submitting.set(true);
     this.api
@@ -457,7 +506,7 @@ export class SnapshotBrowser {
       .subscribe({
         next: (job) => {
           this.submitting.set(false);
-          this.toasts.success('Restore queued: the agent picks it up at its next poll');
+          this.toasts.success(this.transloco.translate('snapshotBrowser.restoreQueued'));
           this.restored.emit(job);
         },
         error: () => this.submitting.set(false),

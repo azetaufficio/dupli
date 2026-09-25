@@ -292,6 +292,7 @@ public sealed record OperatorUserDto(
     string Email,
     OperatorRole Role,
     string? DisplayName,
+    string? Language,
     bool Bound,
     DateTimeOffset? LastLoginAt,
     DateTimeOffset? DisabledAt,

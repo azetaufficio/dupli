@@ -4,7 +4,7 @@
     <button
       type="button"
       class="menu-toggle"
-      aria-label="Menu"
+      [attr.aria-label]="'app.menuToggle' | transloco"
       aria-controls="main-nav"
       [attr.aria-expanded]="menuOpen()"
       (click)="menuOpen.set(!menuOpen())"
@@ -12,17 +12,17 @@
       <span></span><span></span><span></span>
     </button>
     <nav id="main-nav" [class.open]="menuOpen()">
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
-        >Dashboard</a
-      >
-      <a routerLink="/agents" routerLinkActive="active">Agents</a>
-      <a routerLink="/history" routerLinkActive="active">History</a>
-      <a routerLink="/logs" routerLinkActive="active">Logs</a>
-      <a routerLink="/alerts" routerLinkActive="active">Alerts</a>
-      <a routerLink="/storage" routerLinkActive="active">Storage</a>
-      <a routerLink="/releases" routerLinkActive="active">Releases</a>
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">{{
+        'app.nav.dashboard' | transloco
+      }}</a>
+      <a routerLink="/agents" routerLinkActive="active">{{ 'app.nav.agents' | transloco }}</a>
+      <a routerLink="/history" routerLinkActive="active">{{ 'app.nav.history' | transloco }}</a>
+      <a routerLink="/logs" routerLinkActive="active">{{ 'app.nav.logs' | transloco }}</a>
+      <a routerLink="/alerts" routerLinkActive="active">{{ 'app.nav.alerts' | transloco }}</a>
+      <a routerLink="/storage" routerLinkActive="active">{{ 'app.nav.storage' | transloco }}</a>
+      <a routerLink="/releases" routerLinkActive="active">{{ 'app.nav.releases' | transloco }}</a>
       @if (auth.isOwner()) {
-        <a routerLink="/users" routerLinkActive="active">Users</a>
+        <a routerLink="/users" routerLinkActive="active">{{ 'app.nav.users' | transloco }}</a>
       }
     </nav>
   }
@@ -32,7 +32,7 @@
         <button
           type="button"
           class="btn small bell"
-          aria-label="Notifications"
+          [attr.aria-label]="'app.bell.ariaLabel' | transloco"
           [attr.aria-expanded]="bellOpen()"
           (click)="toggleBell()"
         >
@@ -44,7 +44,7 @@
         @if (bellOpen()) {
           <div class="bell-dropdown">
             @if (preview().length === 0) {
-              <div class="empty">No notifications.</div>
+              <div class="empty">{{ 'app.bell.empty' | transloco }}</div>
             } @else {
               <ul>
                 @for (n of preview(); track n.id) {
@@ -56,22 +56,51 @@
               </ul>
             }
             <div class="bell-actions">
-              <button type="button" class="btn small" (click)="markAllRead()">Mark all read</button>
-              <a routerLink="/notifications" (click)="bellOpen.set(false)">See all</a>
+              <button type="button" class="btn small" (click)="markAllRead()">
+                {{ 'app.bell.markAllRead' | transloco }}
+              </button>
+              <a routerLink="/notifications" (click)="bellOpen.set(false)">{{
+                'app.bell.seeAll' | transloco
+              }}</a>
             </div>
           </div>
         }
       </div>
-    }
-    @if (auth.user(); as user) {
-      @if (user.authenticated) {
-        <span class="muted" [title]="(user.email ?? '') + ' · ' + (user.role ?? '')">{{
-          user.name
-        }}</span>
-        <a routerLink="/settings/notifications" routerLinkActive="active" class="btn small"
-          >Settings</a
-        >
-        <button type="button" class="btn small" (click)="auth.logout()">Sign out</button>
+      @if (auth.user(); as user) {
+        @if (user.authenticated) {
+          <div class="user-wrap">
+            <button
+              type="button"
+              class="btn small user-icon"
+              [attr.aria-label]="'app.userMenu.ariaLabel' | transloco"
+              [attr.aria-expanded]="userMenuOpen()"
+              [title]="(user.email ?? '') + ' · ' + (user.role ?? '')"
+              (click)="toggleUserMenu()"
+            >
+              👤
+            </button>
+            @if (userMenuOpen()) {
+              <div class="user-dropdown">
+                <div class="user-dropdown-header">
+                  <div>{{ user.name }}</div>
+                  <div class="muted">{{ (user.email ?? '') + ' · ' + (user.role ?? '') }}</div>
+                </div>
+                <div class="user-dropdown-section">
+                  <div class="muted small-label">{{ 'app.userMenu.language' | transloco }}</div>
+                  <app-language-switcher />
+                </div>
+                <div class="user-dropdown-actions">
+                  <a routerLink="/settings/notifications" (click)="userMenuOpen.set(false)">{{
+                    'app.userMenu.settings' | transloco
+                  }}</a>
+                  <button type="button" class="btn small" (click)="auth.logout()">
+                    {{ 'app.userMenu.signOut' | transloco }}
+                  </button>
+                </div>
+              </div>
+            }
+          </div>
+        }
       }
     }
   </div>
@@ -83,12 +112,8 @@
       <router-outlet />
     } @else if (user.mode === 'None') {
       <section class="card notice">
-        <h1>Interactive login is not configured</h1>
-        <p>
-          Set <code>Dupli__Auth__Mode=EntraId</code> and the Entra ID settings on the server to use
-          the web UI. The admin API is still available with the
-          <code>X-Dupli-Admin-Key</code> header.
-        </p>
+        <h1>{{ 'app.loginNotConfigured.title' | transloco }}</h1>
+        <p [innerHTML]="'app.loginNotConfigured.body' | transloco"></p>
       </section>
     } @else {
       <router-outlet />

@@ -195,9 +195,11 @@ public static class OperatorAuth
         }
 
         var identity = new ClaimsIdentity(
-            principal.Claims.Where(c => c.Type != OperatorClaims.Role),
+            principal.Claims.Where(c => c.Type != OperatorClaims.Role && c.Type != OperatorClaims.Language),
             principal.Identity?.AuthenticationType, OperatorClaims.Name, OperatorClaims.Role);
         identity.AddClaim(new Claim(OperatorClaims.Role, user.Role.ToString()));
+        if (user.Language is { } language)
+            identity.AddClaim(new Claim(OperatorClaims.Language, language));
         ctx.ReplacePrincipal(new ClaimsPrincipal(identity));
     }
 
@@ -273,9 +275,10 @@ public static class OperatorAuth
         var mode = options.Value.Auth.Mode.ToString();
         var user = http.User;
         if (user.Identity?.IsAuthenticated != true)
-            return new UserInfoDto(false, mode, null, null, null);
+            return new UserInfoDto(false, mode, null, null, null, null);
 
-        return new UserInfoDto(true, mode, user.Identity.Name, user.FindFirstValue(OperatorClaims.Email), OperatorClaims.RoleOf(user));
+        return new UserInfoDto(
+            true, mode, user.Identity.Name, user.FindFirstValue(OperatorClaims.Email), OperatorClaims.RoleOf(user), OperatorClaims.LanguageOf(user));
     }
 
     private static void IssueXsrfToken(HttpContext http, IAntiforgery antiforgery)
@@ -333,7 +336,7 @@ public static class OperatorAuth
         !string.IsNullOrEmpty(url) && url[0] == '/' && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'));
 }
 
-public sealed record UserInfoDto(bool Authenticated, string Mode, string? Name, string? Email, OperatorRole? Role);
+public sealed record UserInfoDto(bool Authenticated, string Mode, string? Name, string? Email, OperatorRole? Role, string? Language);
 
 public sealed record BreakGlassLoginRequest(string? Key);
 

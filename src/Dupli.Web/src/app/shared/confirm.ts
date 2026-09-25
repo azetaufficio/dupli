@@ -7,6 +7,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 
 interface ConfirmRequest {
   title: string;
@@ -19,6 +20,7 @@ interface ConfirmRequest {
 /** In-page replacement for window.confirm (which would block and is not styleable). */
 @Injectable({ providedIn: 'root' })
 export class ConfirmService {
+  private readonly transloco = inject(TranslocoService);
   readonly request = signal<ConfirmRequest | null>(null);
 
   ask(
@@ -30,7 +32,7 @@ export class ConfirmService {
       this.request.set({
         title,
         message,
-        confirmLabel: options.confirmLabel ?? 'Confirm',
+        confirmLabel: options.confirmLabel ?? this.transloco.translate('common.confirm'),
         danger: options.danger ?? false,
         resolve,
       }),
@@ -45,13 +47,16 @@ export class ConfirmService {
 
 @Component({
   selector: 'app-confirm-dialog',
+  imports: [TranslocoModule],
   template: `
     <dialog #dialog class="dialog" (cancel)="confirm.close(false)">
       @if (confirm.request(); as r) {
         <h2>{{ r.title }}</h2>
         <p>{{ r.message }}</p>
         <div class="actions">
-          <button type="button" class="btn" (click)="confirm.close(false)">Cancel</button>
+          <button type="button" class="btn" (click)="confirm.close(false)">
+            {{ 'common.cancel' | transloco }}
+          </button>
           <button
             type="button"
             class="btn"

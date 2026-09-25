@@ -28,6 +28,10 @@ public sealed class OperatorUser
     public string? ObjectId { get; set; }
 
     public string? DisplayName { get; set; }
+
+    /// <summary>UI language ("en", "it"); null means unset, the browser's language is used instead.</summary>
+    public string? Language { get; set; }
+
     public DateTimeOffset? LastLoginAt { get; set; }
     public DateTimeOffset? DisabledAt { get; set; }
 

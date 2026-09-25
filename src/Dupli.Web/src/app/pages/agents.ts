@@ -2,6 +2,7 @@ import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { TranslocoModule } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
@@ -13,17 +14,17 @@ import { lookup } from '../shared/tables';
 
 @Component({
   selector: 'app-agents',
-  imports: [Badge, DateTimePipe, FormsModule, RelativeTimePipe, RouterLink],
+  imports: [Badge, DateTimePipe, FormsModule, RelativeTimePipe, RouterLink, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Agents</h1>
-        <p class="muted">One agent per Host, each with its own restic repository.</p>
+        <h1>{{ 'agents.title' | transloco }}</h1>
+        <p class="muted">{{ 'agents.subtitle' | transloco }}</p>
       </div>
       @if (auth.canOperate()) {
         <div class="toolbar">
           <button type="button" class="btn primary" (click)="showForm.set(!showForm())">
-            {{ showForm() ? 'Close' : 'New agent' }}
+            {{ (showForm() ? 'common.close' : 'agents.newAgent') | transloco }}
           </button>
         </div>
       }
@@ -31,17 +32,21 @@ import { lookup } from '../shared/tables';
 
     @if (showForm()) {
       <section class="card">
-        <h2>New agent</h2>
+        <h2>{{ 'agents.newAgent' | transloco }}</h2>
         @if (storageTargets.value()?.length === 0) {
           <p class="error-box">
-            No storage target yet. <a routerLink="/storage">Create one first.</a>
+            {{ 'agents.noStorageTarget' | transloco }}
+            <a routerLink="/storage">{{ 'agents.createStorageFirst' | transloco }}</a>
           </p>
         }
         <form class="form" (ngSubmit)="create()" #f="ngForm">
           <div class="form-row">
-            <label class="field">Name <input name="name" [(ngModel)]="form.name" required /></label>
+            <label class="field"
+              >{{ 'agents.form.name' | transloco }}
+              <input name="name" [(ngModel)]="form.name" required
+            /></label>
             <label class="field">
-              Storage target
+              {{ 'agents.form.storageTarget' | transloco }}
               <select name="storageTargetId" [(ngModel)]="form.storageTargetId" required>
                 @for (s of storageTargets.value() ?? []; track s.id) {
                   <option [value]="s.id">{{ s.name }} ({{ s.bucket }})</option>
@@ -49,25 +54,23 @@ import { lookup } from '../shared/tables';
               </select>
             </label>
             <label class="field">
-              Storage prefix
+              {{ 'agents.form.storagePrefix' | transloco }}
               <input
                 name="storagePrefix"
                 [(ngModel)]="form.storagePrefix"
                 required
                 placeholder="agents/vm-01"
               />
-              <span class="hint"
-                >Path inside the bucket; the S3 key should be restricted to it.</span
-              >
+              <span class="hint">{{ 'agents.form.storagePrefixHint' | transloco }}</span>
             </label>
           </div>
           <div class="form-row">
             <label class="field"
-              >S3 access key id
+              >{{ 'agents.form.s3AccessKeyId' | transloco }}
               <input name="ak" [(ngModel)]="form.s3AccessKeyId" required autocomplete="off"
             /></label>
             <label class="field">
-              S3 secret access key
+              {{ 'agents.form.s3SecretAccessKey' | transloco }}
               <input
                 name="sk"
                 type="password"
@@ -77,10 +80,8 @@ import { lookup } from '../shared/tables';
               />
             </label>
             <label class="field">
-              Repository password
-              <span class="hint"
-                >Optional: only to adopt an existing repository. Generated otherwise.</span
-              >
+              {{ 'agents.form.repositoryPassword' | transloco }}
+              <span class="hint">{{ 'agents.form.repositoryPasswordHint' | transloco }}</span>
               <input
                 name="rp"
                 type="password"
@@ -94,12 +95,9 @@ import { lookup } from '../shared/tables';
           }
           <div class="toolbar">
             <button type="submit" class="btn primary" [disabled]="f.invalid || saving()">
-              Create agent
+              {{ 'agents.form.submit' | transloco }}
             </button>
-            <span class="muted"
-              >Secrets are stored encrypted on the server and delivered to the agent at
-              enrollment.</span
-            >
+            <span class="muted">{{ 'agents.form.secretsNotice' | transloco }}</span>
           </div>
         </form>
       </section>
@@ -107,19 +105,19 @@ import { lookup } from '../shared/tables';
 
     <section class="card flush">
       @if ((agents.value() ?? []).length === 0) {
-        <div class="empty">No agents.</div>
+        <div class="empty">{{ 'agents.empty' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Hostname</th>
-                <th>Agent</th>
-                <th>Storage</th>
-                <th>Last heartbeat</th>
-                <th>Enrolled</th>
+                <th>{{ 'agents.table.name' | transloco }}</th>
+                <th>{{ 'agents.table.status' | transloco }}</th>
+                <th>{{ 'agents.table.hostname' | transloco }}</th>
+                <th>{{ 'agents.table.agent' | transloco }}</th>
+                <th>{{ 'agents.table.storage' | transloco }}</th>
+                <th>{{ 'agents.table.lastHeartbeat' | transloco }}</th>
+                <th>{{ 'agents.table.enrolled' | transloco }}</th>
               </tr>
             </thead>
             <tbody>

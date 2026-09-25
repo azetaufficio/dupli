@@ -3,6 +3,7 @@ import { Component, computed, effect, inject, input, signal } from '@angular/cor
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { catchError, debounceTime, distinctUntilChanged, of, switchMap } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
@@ -100,21 +101,23 @@ function supportedTimeZones(): string[] {
 
 @Component({
   selector: 'app-policy-editor',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
         <p class="muted">
-          <a routerLink="/agents">Agents</a> /
+          <a routerLink="/agents">{{ 'policyEditor.breadcrumbAgents' | transloco }}</a> /
           @if (agent.value(); as a) {
             <a [routerLink]="['/agents', a.id]">{{ a.name }}</a> /
           }
         </p>
-        <h1>{{ id() ? 'Edit policy' : 'New policy' }}</h1>
+        <h1>{{ (id() ? 'policyEditor.title.edit' : 'policyEditor.title.new') | transloco }}</h1>
       </div>
       @if (id() && auth.canOperate()) {
         <div class="toolbar">
-          <button type="button" class="btn danger" (click)="remove()">Delete policy</button>
+          <button type="button" class="btn danger" (click)="remove()">
+            {{ 'policyEditor.deletePolicy' | transloco }}
+          </button>
         </div>
       }
     </div>
@@ -122,32 +125,30 @@ function supportedTimeZones(): string[] {
     @if (ready()) {
       <form class="form" (ngSubmit)="save()" #f="ngForm">
         <section class="card form">
-          <h2>General</h2>
+          <h2>{{ 'policyEditor.general.title' | transloco }}</h2>
           <div class="form-row">
-            <label class="field">Name <input name="name" [(ngModel)]="name" required /></label>
+            <label class="field"
+              >{{ 'policyEditor.general.nameLabel' | transloco }}
+              <input name="name" [(ngModel)]="name" required
+            /></label>
             <label class="field">
-              Storage target
+              {{ 'policyEditor.general.storageTargetLabel' | transloco }}
               <input [value]="storageLabel()" disabled />
-              <span class="hint"
-                >Per agent: every policy of this agent goes to the same repository.</span
-              >
+              <span class="hint">{{ 'policyEditor.general.storageTargetHint' | transloco }}</span>
             </label>
           </div>
           <label class="check"
-            ><input type="checkbox" name="enabled" [(ngModel)]="enabled" /> Enabled
-            (scheduled)</label
+            ><input type="checkbox" name="enabled" [(ngModel)]="enabled" />
+            {{ 'policyEditor.general.enabledLabel' | transloco }}</label
           >
         </section>
 
         <section class="card form">
-          <h2>Schedule</h2>
+          <h2>{{ 'policyEditor.schedule.title' | transloco }}</h2>
           <div class="form-row">
             <label class="field">
-              Cron
-              <span class="hint"
-                >5 fields: minute hour day-of-month month day-of-week. E.g. <code>0 2 * * *</code> =
-                every day at 02:00.</span
-              >
+              {{ 'policyEditor.schedule.cronLabel' | transloco }}
+              <span class="hint" [innerHTML]="'policyEditor.schedule.cronHint' | transloco"></span>
               <input
                 name="cron"
                 class="mono"
@@ -157,7 +158,7 @@ function supportedTimeZones(): string[] {
               />
             </label>
             <label class="field">
-              Time zone
+              {{ 'policyEditor.schedule.timeZoneLabel' | transloco }}
               <select name="timeZone" [ngModel]="timeZone()" (ngModelChange)="timeZone.set($event)">
                 @for (tz of timeZones; track tz) {
                   <option [value]="tz">{{ tz }}</option>
@@ -167,7 +168,9 @@ function supportedTimeZones(): string[] {
           </div>
           @if (preview(); as p) {
             @if (p.valid) {
-              <div class="muted">Next runs: {{ formatNext(p) }}</div>
+              <div class="muted">
+                {{ 'policyEditor.schedule.nextRuns' | transloco: { next: formatNext(p) } }}
+              </div>
             } @else {
               <div class="error-box">{{ p.error }}</div>
             }
@@ -175,59 +178,61 @@ function supportedTimeZones(): string[] {
         </section>
 
         <section class="card form">
-          <h2>Retention</h2>
+          <h2>{{ 'policyEditor.retention.title' | transloco }}</h2>
           <div class="form-row">
             <label class="field"
-              >Daily snapshots
+              >{{ 'policyEditor.retention.dailyLabel' | transloco }}
               <input type="number" min="0" name="kd" [(ngModel)]="keepDaily" required
             /></label>
             <label class="field"
-              >Weekly snapshots
+              >{{ 'policyEditor.retention.weeklyLabel' | transloco }}
               <input type="number" min="0" name="kw" [(ngModel)]="keepWeekly" required
             /></label>
             <label class="field"
-              >Monthly snapshots
+              >{{ 'policyEditor.retention.monthlyLabel' | transloco }}
               <input type="number" min="0" name="km" [(ngModel)]="keepMonthly" required
             /></label>
           </div>
-          <span class="muted"
-            >Applied by the weekly retention job (restic forget --keep-daily/weekly/monthly, then
-            prune).</span
-          >
+          <span class="muted">{{ 'policyEditor.retention.hint' | transloco }}</span>
         </section>
 
         <section class="card form">
           <div class="page-header" style="margin: 0">
-            <h2 style="margin: 0">Sources</h2>
+            <h2 style="margin: 0">{{ 'policyEditor.sources.title' | transloco }}</h2>
             <div class="toolbar">
               <button type="button" class="btn small" (click)="addSource('directory')">
-                + Folders
+                {{ 'policyEditor.sources.addFolders' | transloco }}
               </button>
               <button type="button" class="btn small" (click)="addSource('postgres')">
-                + PostgreSQL
+                {{ 'policyEditor.sources.addPostgres' | transloco }}
               </button>
             </div>
           </div>
           @if (sources().length === 0) {
-            <div class="empty">Add at least one source.</div>
+            <div class="empty">{{ 'policyEditor.sources.empty' | transloco }}</div>
           }
           @for (s of sources(); track $index; let i = $index) {
             <div class="card" style="margin: 0; box-shadow: none">
               <div class="page-header" style="margin-bottom: 0.75rem">
                 <h3 style="margin: 0">
-                  {{ s.type === 'directory' ? 'Folders' : 'PostgreSQL instance' }}
+                  {{
+                    (s.type === 'directory'
+                      ? 'policyEditor.sources.folderType'
+                      : 'policyEditor.sources.postgresType'
+                    ) | transloco
+                  }}
                 </h3>
                 <button type="button" class="btn small danger" (click)="removeSource(i)">
-                  Remove
+                  {{ 'policyEditor.sources.remove' | transloco }}
                 </button>
               </div>
               <div class="form">
                 <label class="field">
-                  Source id
-                  <span class="hint"
-                    >Stable key used in the restic <code>source=</code> tag. Changing it starts a
-                    new snapshot history.</span
-                  >
+                  {{ 'policyEditor.sources.sourceIdLabel' | transloco }}
+                  <span
+                    class="hint"
+                    [innerHTML]="'policyEditor.sources.sourceIdHint' | transloco"
+                  ></span>
                   <input
                     [name]="'sid' + i"
                     [(ngModel)]="s.sourceId"
@@ -238,40 +243,48 @@ function supportedTimeZones(): string[] {
                 @if (s.type === 'directory') {
                   <div class="form-row">
                     <label class="field">
-                      Paths <span class="hint">One per line, e.g. <code>D:\\Data</code></span>
+                      {{ 'policyEditor.sources.pathsLabel' | transloco }}
+                      <span class="hint" [innerHTML]="'policyEditor.sources.pathsHint' | transloco"></span>
                       <textarea [name]="'paths' + i" [(ngModel)]="s.paths" required></textarea>
                     </label>
                     <label class="field">
-                      Excludes
-                      <span class="hint">One restic exclude pattern per line (optional)</span>
+                      {{ 'policyEditor.sources.excludesLabel' | transloco }}
+                      <span class="hint">{{ 'policyEditor.sources.excludesHint' | transloco }}</span>
                       <textarea [name]="'ex' + i" [(ngModel)]="s.excludes"></textarea>
                     </label>
                   </div>
                 } @else {
                   @if (connections().length === 0) {
                     <div class="hint">
-                      This agent has no PostgreSQL connections yet. Add one in its
-                      <a [routerLink]="['/agents', agentIdResolved()]">Connections tab</a>, then
-                      come back.
+                      {{ 'policyEditor.sources.postgres.noConnectionsPrefix' | transloco }}
+                      <a [routerLink]="['/agents', agentIdResolved()]">{{
+                        'policyEditor.sources.postgres.connectionsTabLink' | transloco
+                      }}</a
+                      >{{ 'policyEditor.sources.postgres.noConnectionsSuffix' | transloco }}
                     </div>
                   } @else {
                     <label class="field">
-                      Connection
+                      {{ 'policyEditor.sources.postgres.connectionLabel' | transloco }}
                       <select [name]="'conn' + i" [(ngModel)]="s.connectionId" required>
-                        <option value="" disabled>Select a connection…</option>
+                        <option value="" disabled>
+                          {{ 'policyEditor.sources.postgres.selectConnectionPlaceholder' | transloco }}
+                        </option>
                         @for (c of connections(); track c.id) {
                           <option [value]="c.id">{{ c.name }}</option>
                         }
                       </select>
                       <span class="hint"
-                        >Host, port, username and password secret come from the agent's
-                        <a [routerLink]="['/agents', agentIdResolved()]">Connections</a>.</span
+                        >{{ 'policyEditor.sources.postgres.connectionHintPrefix' | transloco }}
+                        <a [routerLink]="['/agents', agentIdResolved()]">{{
+                          'policyEditor.sources.postgres.connectionsLink' | transloco
+                        }}</a
+                        >.</span
                       >
                     </label>
                   }
                   <div class="form-row">
                     <div class="field">
-                      Databases
+                      {{ 'policyEditor.sources.postgres.databasesLabel' | transloco }}
                       <label class="check">
                         <input
                           type="radio"
@@ -279,7 +292,7 @@ function supportedTimeZones(): string[] {
                           value="AllExcept"
                           [(ngModel)]="s.databaseSelection"
                         />
-                        All except the excluded ones
+                        {{ 'policyEditor.sources.postgres.allExceptLabel' | transloco }}
                       </label>
                       <label class="check">
                         <input
@@ -288,27 +301,31 @@ function supportedTimeZones(): string[] {
                           value="Only"
                           [(ngModel)]="s.databaseSelection"
                         />
-                        Only the listed ones
+                        {{ 'policyEditor.sources.postgres.onlyListedLabel' | transloco }}
                       </label>
                       @if (s.databaseSelection === 'AllExcept') {
-                        <span class="hint"
-                          >Excluded, one per line. Templates and <code>postgres</code> are always
-                          skipped.</span
-                        >
+                        <span
+                          class="hint"
+                          [innerHTML]="'policyEditor.sources.postgres.excludeHint' | transloco"
+                        ></span>
                         <textarea
                           [name]="'exdb' + i"
                           [(ngModel)]="s.excludeDatabases"
-                          aria-label="Excluded databases"
+                          [attr.aria-label]="
+                            'policyEditor.sources.postgres.excludedAriaLabel' | transloco
+                          "
                         ></textarea>
                       } @else {
-                        <span class="hint"
-                          >Backed up, one per line (<code>postgres</code> allowed). A database
-                          missing on the server fails the backup.</span
-                        >
+                        <span
+                          class="hint"
+                          [innerHTML]="'policyEditor.sources.postgres.includeHint' | transloco"
+                        ></span>
                         <textarea
                           [name]="'incdb' + i"
                           [(ngModel)]="s.includeDatabases"
-                          aria-label="Included databases"
+                          [attr.aria-label]="
+                            'policyEditor.sources.postgres.includedAriaLabel' | transloco
+                          "
                           required
                         ></textarea>
                       }
@@ -316,7 +333,9 @@ function supportedTimeZones(): string[] {
                   </div>
                   <label class="check">
                     <input type="checkbox" [name]="'glob' + i" [(ngModel)]="s.includeGlobals" />
-                    Include roles and tablespaces (<code>pg_dumpall --globals-only</code>)
+                    <span
+                      [innerHTML]="'policyEditor.sources.postgres.includeGlobalsLabel' | transloco"
+                    ></span>
                   </label>
                 }
               </div>
@@ -334,14 +353,18 @@ function supportedTimeZones(): string[] {
               class="btn primary"
               [disabled]="f.invalid || sources().length === 0 || saving()"
             >
-              {{ id() ? 'Save changes' : 'Create policy' }}
+              {{
+                (id() ? 'policyEditor.saveChanges' : 'policyEditor.createPolicy') | transloco
+              }}
             </button>
           }
-          <a class="btn" [routerLink]="['/agents', agentIdResolved()]">Cancel</a>
+          <a class="btn" [routerLink]="['/agents', agentIdResolved()]">{{
+            'common.cancel' | transloco
+          }}</a>
         </div>
       </form>
     } @else {
-      <p class="muted">Loading…</p>
+      <p class="muted">{{ 'common.loading' | transloco }}</p>
     }
   `,
 })
@@ -356,6 +379,7 @@ export class PolicyEditorPage {
   private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly timeZones = supportedTimeZones();
 
@@ -473,7 +497,7 @@ export class PolicyEditorPage {
     this.error.set(null);
     call.subscribe({
       next: (policy) => {
-        this.toasts.success(`Policy "${policy.name}" saved`);
+        this.toasts.success(this.transloco.translate('policyEditor.toasts.saved', { name: policy.name }));
         this.router.navigate(['/agents', policy.agentId]);
       },
       error: (e) => {
@@ -487,14 +511,14 @@ export class PolicyEditorPage {
     const id = this.id();
     if (!id) return;
     const ok = await this.confirm.ask(
-      'Delete policy?',
-      'The policy and its run history are deleted. Existing snapshots stay in the repository until retention removes them.',
-      { confirmLabel: 'Delete', danger: true },
+      this.transloco.translate('policyEditor.confirmDelete.title'),
+      this.transloco.translate('policyEditor.confirmDelete.message'),
+      { confirmLabel: this.transloco.translate('common.delete'), danger: true },
     );
     if (!ok) return;
     const agentId = this.agentIdResolved();
     this.api.deletePolicy(id).subscribe(() => {
-      this.toasts.success('Policy deleted');
+      this.toasts.success(this.transloco.translate('policyEditor.toasts.deleted'));
       this.router.navigate(['/agents', agentId]);
     });
   }

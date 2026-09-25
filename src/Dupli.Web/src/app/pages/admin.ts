@@ -1,6 +1,7 @@
 import { HttpClient, HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoModule } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import { OperatorUsers } from '../shared/operator-users';
@@ -13,36 +14,32 @@ type State = 'checking' | 'disabled' | 'locked' | 'open';
  */
 @Component({
   selector: 'app-admin',
-  imports: [FormsModule, OperatorUsers],
+  imports: [FormsModule, OperatorUsers, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Break-glass user management</h1>
-        <p class="muted">
-          Admin key access for when no owner can sign in. The session lasts 15 minutes and only
-          manages users.
-        </p>
+        <h1>{{ 'admin.title' | transloco }}</h1>
+        <p class="muted">{{ 'admin.subtitle' | transloco }}</p>
       </div>
       @if (state() === 'open') {
-        <button type="button" class="btn" (click)="close()">Close session</button>
+        <button type="button" class="btn" (click)="close()">
+          {{ 'admin.closeSession' | transloco }}
+        </button>
       }
     </div>
 
     @switch (state()) {
       @case ('disabled') {
         <section class="card notice">
-          <h2>Disabled</h2>
-          <p>
-            Set <code>Dupli__Admin__ApiKey</code> on the server and restart it to use this page.
-            Remove it again afterwards.
-          </p>
+          <h2>{{ 'admin.disabled.title' | transloco }}</h2>
+          <p [innerHTML]="'admin.disabled.body' | transloco"></p>
         </section>
       }
       @case ('locked') {
         <section class="card">
           <form class="form" (ngSubmit)="open()" #f="ngForm">
             <label class="field"
-              >Admin key
+              >{{ 'admin.form.adminKey' | transloco }}
               <input name="key" type="password" [(ngModel)]="key" required autocomplete="off"
             /></label>
             @if (error()) {
@@ -50,7 +47,7 @@ type State = 'checking' | 'disabled' | 'locked' | 'open';
             }
             <div class="toolbar">
               <button type="submit" class="btn primary" [disabled]="f.invalid || busy()">
-                Open session
+                {{ 'admin.form.openSession' | transloco }}
               </button>
             </div>
           </form>

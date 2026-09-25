@@ -13,6 +13,7 @@ public static class OperatorClaims
 {
     public const string UserId = "sub";
     public const string Role = "dupli:role";
+    public const string Language = "dupli:language";
     public const string Name = "name";
     public const string Email = "email";
     public const string TenantId = "tid";
@@ -24,6 +25,8 @@ public static class OperatorClaims
 
     public static OperatorRole? RoleOf(ClaimsPrincipal user) =>
         Enum.TryParse<OperatorRole>(user.FindFirstValue(Role), out var role) ? role : null;
+
+    public static string? LanguageOf(ClaimsPrincipal user) => user.FindFirstValue(Language);
 }
 
 /// <summary>What the identity provider says about the person signing in.</summary>

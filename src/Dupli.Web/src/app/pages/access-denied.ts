@@ -1,22 +1,25 @@
 import { Component, inject, input } from '@angular/core';
+import { TranslocoModule } from '@jsverse/transloco';
 import { AuthService } from '../core/auth.service';
 
 /** Where the server sends an Entra ID account that is not (or no longer) a Dupli user. No session exists. */
 @Component({
   selector: 'app-access-denied',
+  imports: [TranslocoModule],
   template: `
     <section class="card notice">
-      <h1>Access denied</h1>
+      <h1>{{ 'accessDenied.title' | transloco }}</h1>
       <p>
         @if (email()) {
-          <strong>{{ email() }}</strong> is not enabled in Dupli.
+          <strong>{{ email() }}</strong>
+          {{ 'accessDenied.accountNotEnabled' | transloco }}
         } @else {
-          This account is not enabled in Dupli.
+          {{ 'accessDenied.thisAccountNotEnabled' | transloco }}
         }
-        Ask an owner to invite you, then sign in again.
+        {{ 'accessDenied.askOwner' | transloco }}
       </p>
       <button type="button" class="btn" (click)="auth.loginWithAnotherAccount()">
-        Sign in with another account
+        {{ 'accessDenied.signInAnotherAccount' | transloco }}
       </button>
     </section>
   `,

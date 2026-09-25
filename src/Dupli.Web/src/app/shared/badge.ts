@@ -1,4 +1,5 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, inject, input } from '@angular/core';
+import { TranslocoService } from '@jsverse/transloco';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'muted';
 
@@ -31,24 +32,22 @@ const TONES: Record<string, Tone> = {
   Invited: 'info',
 };
 
-const LABELS: Record<string, string> = {
-  SucceededWithWarnings: 'Warnings',
-  TimedOut: 'Timed out',
-  Information: 'Info',
-  RolledBack: 'Rollback',
-};
-
-/** Colored status pill; the tone is derived from well-known state names. */
+/** Colored status pill; the tone and translated label are derived from well-known state names. */
 @Component({
   selector: 'app-badge',
   template: `<span class="badge" [class]="'badge tone-' + tone()">{{ label() }}</span>`,
 })
 export class Badge {
+  private readonly transloco = inject(TranslocoService);
+
   readonly value = input.required<string | null | undefined>();
   readonly text = input<string>();
 
   protected readonly tone = computed<Tone>(() => TONES[this.value() ?? ''] ?? 'muted');
-  protected readonly label = computed(
-    () => this.text() ?? LABELS[this.value() ?? ''] ?? this.value() ?? '—',
-  );
+  protected readonly label = computed(() => {
+    this.transloco.activeLang(); // re-run when the language changes
+    const raw = this.value() ?? '';
+    if (this.text()) return this.text()!;
+    return raw in TONES ? this.transloco.translate('status.' + raw) : raw || '—';
+  });
 }

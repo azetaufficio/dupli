@@ -1,19 +1,30 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { TranslocoModule } from '@jsverse/transloco';
 import { filter, interval, startWith, switchMap } from 'rxjs';
 import { ApiService } from './core/api.service';
 import { AuthService, isStandalonePath } from './core/auth.service';
 import { RelativeTimePipe } from './shared/format';
 import { OperatorNotification } from './core/models';
 import { ConfirmDialog } from './shared/confirm';
+import { LanguageSwitcher } from './shared/language-switcher';
 import { unreadBadgeLabel } from './shared/notification-badge';
 import { Toasts } from './shared/toasts';
 
 const UNREAD_POLL_INTERVAL = 60_000;
 
 @Component({
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, ConfirmDialog, Toasts, RelativeTimePipe],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    ConfirmDialog,
+    Toasts,
+    RelativeTimePipe,
+    TranslocoModule,
+    LanguageSwitcher,
+  ],
   selector: 'app-root',
   styleUrl: './app.css',
   templateUrl: './app.html',
@@ -24,6 +35,7 @@ export class App {
   private readonly router = inject(Router);
   protected readonly menuOpen = signal(false);
   protected readonly bellOpen = signal(false);
+  protected readonly userMenuOpen = signal(false);
   protected readonly unreadCount = signal(0);
   protected readonly preview = signal<OperatorNotification[]>([]);
   protected readonly bellBadge = computed(() => unreadBadgeLabel(this.unreadCount()));
@@ -38,6 +50,7 @@ export class App {
       .subscribe((e) => {
         this.menuOpen.set(false);
         this.bellOpen.set(false);
+        this.userMenuOpen.set(false);
         const standalone = isStandalonePath(e.urlAfterRedirects.split(/[?#]/)[0]);
         this.auth.standalone.set(standalone);
         const user = this.auth.user();
@@ -58,7 +71,16 @@ export class App {
   protected toggleBell(): void {
     const next = !this.bellOpen();
     this.bellOpen.set(next);
-    if (next) this.api.myNotifications({ limit: 10 }).subscribe((items) => this.preview.set(items));
+    if (next) {
+      this.userMenuOpen.set(false);
+      this.api.myNotifications({ limit: 10 }).subscribe((items) => this.preview.set(items));
+    }
+  }
+
+  protected toggleUserMenu(): void {
+    const next = !this.userMenuOpen();
+    this.userMenuOpen.set(next);
+    if (next) this.bellOpen.set(false);
   }
 
   protected markAllRead(): void {

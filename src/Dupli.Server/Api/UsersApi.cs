@@ -152,5 +152,5 @@ public static class UsersApi
     }
 
     private static OperatorUserDto ToDto(OperatorUser u) =>
-        new(u.Id, u.Email, u.Role, u.DisplayName, u.IsBound, u.LastLoginAt, u.DisabledAt, u.CreatedAt, u.CreatedBy, u.UpdatedAt, u.UpdatedBy);
+        new(u.Id, u.Email, u.Role, u.DisplayName, u.Language, u.IsBound, u.LastLoginAt, u.DisabledAt, u.CreatedAt, u.CreatedBy, u.UpdatedAt, u.UpdatedBy);
 }

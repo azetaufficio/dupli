@@ -62,12 +62,18 @@ export const TERMINAL_STATES: readonly JobState[] = [
 export const OPERATOR_ROLES = ['Viewer', 'Operator', 'Owner'] as const;
 export type OperatorRole = (typeof OPERATOR_ROLES)[number];
 
+/** UI languages the app is translated into; also the values accepted by PUT /api/me/language. */
+export const SUPPORTED_LANGUAGES = ['en', 'it'] as const;
+export type Language = (typeof SUPPORTED_LANGUAGES)[number];
+
 export interface UserInfo {
   authenticated: boolean;
   mode: 'None' | 'EntraId';
   name: string | null;
   email: string | null;
   role: OperatorRole | null;
+  /** Null until the user picks one: the browser's language is used instead. */
+  language: Language | null;
 }
 
 export interface OperatorUser {
@@ -75,6 +81,7 @@ export interface OperatorUser {
   email: string;
   role: OperatorRole;
   displayName: string | null;
+  language: Language | null;
   /** False while the invitation has not been used for a first sign-in. */
   bound: boolean;
   lastLoginAt: string | null;

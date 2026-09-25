@@ -227,6 +227,24 @@ public sealed class OperatorUsersTests(PostgresFixture postgres) : IAsyncLifetim
 
         Assert.Empty(unguarded);
     }
+
+    [Fact]
+    public async Task Language_preference_is_set_persisted_and_rejects_unsupported_values()
+    {
+        var browser = await OwnerAsync();
+        Assert.Null((await UserAsync(browser)).Language);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(browser, HttpMethod.Put, "/api/me/language", new SetLanguageRequest("it"))).StatusCode);
+        Assert.Equal("it", (await UserAsync(browser)).Language);
+
+        // Persisted: a fresh sign-in (new session, same operator) still sees it.
+        var again = await _server.SignInAsync(DupliTestServer.BootstrapOwnerEmail);
+        Assert.Equal("it", (await UserAsync(again)).Language);
+
+        var rejected = await SendAsync(browser, HttpMethod.Put, "/api/me/language", new SetLanguageRequest("fr"));
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal("it", (await UserAsync(browser)).Language);
+    }
 }
 
 [Collection(ServerCollection.Name)]

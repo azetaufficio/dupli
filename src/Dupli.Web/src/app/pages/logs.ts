@@ -1,6 +1,7 @@
 import { httpResource } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoModule } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { Agent } from '../core/models';
 import { PagedList } from '../shared/paged-list';
@@ -8,27 +9,29 @@ import { LogsTable } from '../shared/tables';
 
 @Component({
   selector: 'app-logs',
-  imports: [FormsModule, LogsTable],
+  imports: [FormsModule, LogsTable, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Agent logs</h1>
-        <p class="muted">Information and above, uploaded by the agents in batches.</p>
+        <h1>{{ 'logs.title' | transloco }}</h1>
+        <p class="muted">{{ 'logs.subtitle' | transloco }}</p>
       </div>
       <div class="toolbar">
         <select [ngModel]="agentId()" (ngModelChange)="onFilterChange('agent', $event)" style="width: auto">
-          <option value="">All agents</option>
+          <option value="">{{ 'logs.allAgents' | transloco }}</option>
           @for (a of agents.value() ?? []; track a.id) {
             <option [value]="a.id">{{ a.name }}</option>
           }
         </select>
         <select [ngModel]="level()" (ngModelChange)="onFilterChange('level', $event)" style="width: auto">
-          <option value="">All levels</option>
-          <option value="Information">Information</option>
-          <option value="Warning">Warning</option>
-          <option value="Error">Error</option>
+          <option value="">{{ 'logs.allLevels' | transloco }}</option>
+          <option value="Information">{{ 'logs.levels.information' | transloco }}</option>
+          <option value="Warning">{{ 'logs.levels.warning' | transloco }}</option>
+          <option value="Error">{{ 'logs.levels.error' | transloco }}</option>
         </select>
-        <button type="button" class="btn" (click)="logs.reload()">Refresh</button>
+        <button type="button" class="btn" (click)="logs.reload()">
+          {{ 'logs.refresh' | transloco }}
+        </button>
       </div>
     </div>
     <section class="card flush">
@@ -41,7 +44,7 @@ import { LogsTable } from '../shared/tables';
             [disabled]="logs.loadingMore()"
             (click)="logs.loadMore()"
           >
-            {{ logs.loadingMore() ? 'Loading…' : 'Load more' }}
+            {{ logs.loadingMore() ? ('common.loading' | transloco) : ('logs.loadMore' | transloco) }}
           </button>
         </div>
       }

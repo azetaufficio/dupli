@@ -1,23 +1,21 @@
 import { httpResource } from '@angular/common/http';
 import { Component, signal } from '@angular/core';
+import { TranslocoModule } from '@jsverse/transloco';
 import { Alert } from '../core/models';
 import { AlertsTable } from '../shared/tables';
 
 @Component({
   selector: 'app-alerts',
-  imports: [AlertsTable],
+  imports: [AlertsTable, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Alerts</h1>
-        <p class="muted">
-          Evaluated every minute. Notifications are sent by e-mail when an alert opens and when it
-          resolves.
-        </p>
+        <h1>{{ 'alerts.title' | transloco }}</h1>
+        <p class="muted">{{ 'alerts.subtitle' | transloco }}</p>
       </div>
       <div class="toolbar">
         <button type="button" class="btn" [class.primary]="openOnly()" (click)="openOnly.set(true)">
-          Open
+          {{ 'alerts.open' | transloco }}
         </button>
         <button
           type="button"
@@ -25,7 +23,7 @@ import { AlertsTable } from '../shared/tables';
           [class.primary]="!openOnly()"
           (click)="openOnly.set(false)"
         >
-          All
+          {{ 'alerts.all' | transloco }}
         </button>
       </div>
     </div>

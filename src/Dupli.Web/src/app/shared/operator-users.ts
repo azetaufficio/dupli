@@ -1,6 +1,7 @@
 import { HttpContext } from '@angular/common/http';
 import { Component, inject, input, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
 import { InviteOperatorRequest, OPERATOR_ROLES, OperatorRole, OperatorUser } from '../core/models';
@@ -16,22 +17,22 @@ import { NotificationPreferences } from './notification-preferences';
  */
 @Component({
   selector: 'app-operator-users',
-  imports: [Badge, DateTimePipe, FormsModule, NotificationPreferences, RelativeTimePipe],
+  imports: [Badge, DateTimePipe, FormsModule, NotificationPreferences, RelativeTimePipe, TranslocoModule],
   template: `
     <section class="card">
-      <h2>Invite</h2>
+      <h2>{{ 'operatorUsers.invite.title' | transloco }}</h2>
       <form class="form" (ngSubmit)="invite()" #f="ngForm">
         <div class="form-row">
           <label class="field"
-            >Email
-            <span class="hint">Entra ID email or UPN. Bound to the account on first sign-in.</span>
+            >{{ 'operatorUsers.invite.emailLabel' | transloco }}
+            <span class="hint">{{ 'operatorUsers.invite.emailHint' | transloco }}</span>
             <input name="email" type="email" [(ngModel)]="form.email" required autocomplete="off"
           /></label>
           <label class="field"
-            >Role
+            >{{ 'operatorUsers.invite.roleLabel' | transloco }}
             <select name="role" [(ngModel)]="form.role">
               @for (r of roles; track r) {
-                <option [value]="r">{{ r }}</option>
+                <option [value]="r">{{ 'operatorUsers.roles.' + r | transloco }}</option>
               }
             </select>
           </label>
@@ -41,28 +42,26 @@ import { NotificationPreferences } from './notification-preferences';
         }
         <div class="toolbar">
           <button type="submit" class="btn primary" [disabled]="f.invalid || saving()">
-            Invite
+            {{ 'operatorUsers.invite.submit' | transloco }}
           </button>
-          <span class="muted"
-            >No email is sent: tell the person to open Dupli and sign in with that account.</span
-          >
+          <span class="muted">{{ 'operatorUsers.invite.noEmailSent' | transloco }}</span>
         </div>
       </form>
     </section>
 
     <section class="card flush">
       @if (users().length === 0) {
-        <div class="empty">No users.</div>
+        <div class="empty">{{ 'operatorUsers.empty' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>User</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Last sign-in</th>
-                <th>Updated</th>
+                <th>{{ 'operatorUsers.table.user' | transloco }}</th>
+                <th>{{ 'operatorUsers.table.role' | transloco }}</th>
+                <th>{{ 'operatorUsers.table.status' | transloco }}</th>
+                <th>{{ 'operatorUsers.table.lastSignIn' | transloco }}</th>
+                <th>{{ 'operatorUsers.table.updated' | transloco }}</th>
                 <th></th>
               </tr>
             </thead>
@@ -79,10 +78,12 @@ import { NotificationPreferences } from './notification-preferences';
                     <select
                       [ngModel]="u.role"
                       (ngModelChange)="setRole(u, $event)"
-                      [attr.aria-label]="'Role of ' + u.email"
+                      [attr.aria-label]="
+                        'operatorUsers.roleOfAriaLabel' | transloco: { email: u.email }
+                      "
                     >
                       @for (r of roles; track r) {
-                        <option [value]="r">{{ r }}</option>
+                        <option [value]="r">{{ 'operatorUsers.roles.' + r | transloco }}</option>
                       }
                     </select>
                   </td>
@@ -99,20 +100,20 @@ import { NotificationPreferences } from './notification-preferences';
                   </td>
                   <td class="nowrap">
                     <button type="button" class="btn small" (click)="toggleNotifications(u.id)">
-                      Notifications
+                      {{ 'operatorUsers.notifications' | transloco }}
                     </button>
                     @if (u.disabledAt) {
                       <button type="button" class="btn small" (click)="setDisabled(u, false)">
-                        Enable
+                        {{ 'operatorUsers.enable' | transloco }}
                       </button>
                     } @else if (u.bound) {
                       <button type="button" class="btn small" (click)="setDisabled(u, true)">
-                        Disable
+                        {{ 'operatorUsers.disable' | transloco }}
                       </button>
                     }
                     @if (!u.bound || privileged()) {
                       <button type="button" class="btn small danger" (click)="remove(u)">
-                        Delete
+                        {{ 'common.delete' | transloco }}
                       </button>
                     }
                   </td>
@@ -136,6 +137,7 @@ export class OperatorUsers implements OnInit {
   private readonly api = inject(ApiService);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly transloco = inject(TranslocoService);
 
   readonly privileged = input(false);
 
@@ -164,7 +166,12 @@ export class OperatorUsers implements OnInit {
     const request = { ...this.form, email: this.form.email.trim() };
     this.api.inviteUser(request, new HttpContext().set(SILENT_ERRORS, true)).subscribe({
       next: (u) => {
-        this.toasts.success(`${u.email} invited as ${u.role}`);
+        this.toasts.success(
+          this.transloco.translate('operatorUsers.toasts.invited', {
+            email: u.email,
+            role: this.transloco.translate('operatorUsers.roles.' + u.role),
+          }),
+        );
         this.form = { email: '', role: 'Viewer' };
         this.saving.set(false);
         this.reload();
@@ -178,7 +185,13 @@ export class OperatorUsers implements OnInit {
 
   protected setRole(user: OperatorUser, role: OperatorRole): void {
     this.api.setUserRole(user.id, role).subscribe({
-      next: (u) => this.toasts.success(`${u.email} is now ${u.role}`),
+      next: (u) =>
+        this.toasts.success(
+          this.transloco.translate('operatorUsers.toasts.roleChanged', {
+            email: u.email,
+            role: this.transloco.translate('operatorUsers.roles.' + u.role),
+          }),
+        ),
       // Refused (e.g. last owner): put the select back to the stored role.
       error: () => this.reload(),
       complete: () => this.reload(),
@@ -189,9 +202,9 @@ export class OperatorUsers implements OnInit {
     if (
       disabled &&
       !(await this.confirm.ask(
-        'Disable user',
-        `${user.email} loses access immediately, including open sessions.`,
-        { confirmLabel: 'Disable', danger: true },
+        this.transloco.translate('operatorUsers.confirmDisable.title'),
+        this.transloco.translate('operatorUsers.confirmDisable.message', { email: user.email }),
+        { confirmLabel: this.transloco.translate('operatorUsers.disable'), danger: true },
       ))
     )
       return;
@@ -200,9 +213,17 @@ export class OperatorUsers implements OnInit {
 
   protected async remove(user: OperatorUser): Promise<void> {
     const message = user.bound
-      ? `${user.email} has already signed in. Deleting it removes the account binding; disabling keeps it.`
-      : `The invitation for ${user.email} will be removed.`;
-    if (!(await this.confirm.ask('Delete user', message, { confirmLabel: 'Delete', danger: true })))
+      ? this.transloco.translate('operatorUsers.confirmDelete.boundMessage', { email: user.email })
+      : this.transloco.translate('operatorUsers.confirmDelete.invitationMessage', {
+          email: user.email,
+        });
+    if (
+      !(await this.confirm.ask(
+        this.transloco.translate('operatorUsers.confirmDelete.title'),
+        message,
+        { confirmLabel: this.transloco.translate('common.delete'), danger: true },
+      ))
+    )
       return;
     this.api.deleteUser(user.id).subscribe(() => this.reload());
   }

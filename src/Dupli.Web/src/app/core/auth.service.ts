@@ -1,7 +1,10 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { TranslocoService } from '@jsverse/transloco';
 import { firstValueFrom } from 'rxjs';
-import { OPERATOR_ROLES, OperatorRole, UserInfo } from './models';
+import { ApiService } from './api.service';
+import { resolveLanguage } from './language';
+import { Language, OPERATOR_ROLES, OperatorRole, UserInfo } from './models';
 
 export const XSRF_COOKIE = 'XSRF-TOKEN';
 export const XSRF_FORM_FIELD = '__RequestVerificationToken';
@@ -26,6 +29,8 @@ export function hasRole(role: OperatorRole | null | undefined, minimum: Operator
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
+  private readonly api = inject(ApiService);
+  private readonly transloco = inject(TranslocoService);
   readonly user = signal<UserInfo | null>(null);
   readonly standalone = signal(false);
 
@@ -35,15 +40,28 @@ export class AuthService {
   /** Users, storage targets, releases. */
   readonly isOwner = computed(() => hasRole(this.role(), 'Owner'));
 
+  constructor() {
+    // Keeps the <html lang> attribute (accessibility, form controls) in sync with the active language.
+    effect(() => document.documentElement.setAttribute('lang', this.transloco.activeLang()));
+  }
+
   /** Resolves once the user is known; never resolves when a login redirect is under way. */
   async init(): Promise<void> {
     this.standalone.set(isStandalonePath(window.location.pathname));
     const user = await firstValueFrom(this.http.get<UserInfo>('/bff/user'));
     this.user.set(user);
+    this.transloco.setActiveLang(resolveLanguage(user.language));
     if (!user.authenticated && user.mode !== 'None' && !this.standalone()) {
       this.login();
       await new Promise<never>(() => {});
     }
+  }
+
+  /** Applies at once (no rebuild needed) and persists for next time, on any device. */
+  setLanguage(language: Language): void {
+    this.transloco.setActiveLang(language);
+    this.user.update((u) => (u ? { ...u, language } : u));
+    this.api.setMyLanguage(language).subscribe();
   }
 
   login(): void {

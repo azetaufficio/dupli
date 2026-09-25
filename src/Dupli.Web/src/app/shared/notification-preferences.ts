@@ -1,25 +1,9 @@
 import { Component, inject, input, OnInit, signal } from '@angular/core';
+import { TranslocoModule } from '@jsverse/transloco';
 import { ALERT_KINDS, AlertKind, NotificationPreference } from '../core/models';
 import { ApiService } from '../core/api.service';
 import { problemMessage } from '../core/http-errors.interceptor';
 import { ToastService } from '../core/toast.service';
-
-/** "AgentOffline" -> "Agent offline". Also used by the /notifications feed. */
-export function alertKindLabel(kind: AlertKind): string {
-  const spaced = kind.replace(/([a-z])([A-Z])/g, '$1 $2');
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
-}
-
-const DESCRIPTIONS: Record<AlertKind, string> = {
-  AgentOffline: 'An agent has not sent a heartbeat for a while.',
-  BackupFailed: 'A backup job failed or timed out.',
-  BackupMissed: 'A scheduled backup did not run.',
-  BackupTooOld: 'A policy has had no successful backup for too long.',
-  RepositoryCheckFailed: 'A repository consistency check failed.',
-  RestoreTestFailed: 'A scheduled restore test failed.',
-  AgentUpdateFailed: 'An agent update was rolled back.',
-  AgentOutdated: 'An agent has been stuck off the desired version for a while.',
-};
 
 /**
  * Per-kind e-mail / in-app toggles: the current user's own preferences at `/settings/notifications`
@@ -27,27 +11,31 @@ const DESCRIPTIONS: Record<AlertKind, string> = {
  */
 @Component({
   selector: 'app-notification-preferences',
+  imports: [TranslocoModule],
   template: `
     @if (loaded()) {
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Alert</th>
-              <th>Description</th>
-              <th>Mail</th>
-              <th>In-app</th>
+              <th>{{ 'notificationPreferences.table.alert' | transloco }}</th>
+              <th>{{ 'notificationPreferences.table.description' | transloco }}</th>
+              <th>{{ 'notificationPreferences.table.mail' | transloco }}</th>
+              <th>{{ 'notificationPreferences.table.inApp' | transloco }}</th>
             </tr>
           </thead>
           <tbody>
             @for (p of preferences(); track p.kind) {
               <tr>
-                <td class="nowrap">{{ label(p.kind) }}</td>
-                <td class="muted">{{ description(p.kind) }}</td>
+                <td class="nowrap">{{ 'alertKind.' + p.kind + '.label' | transloco }}</td>
+                <td class="muted">{{ 'alertKind.' + p.kind + '.description' | transloco }}</td>
                 <td>
                   <input
                     type="checkbox"
-                    [attr.aria-label]="label(p.kind) + ' by mail'"
+                    [attr.aria-label]="
+                      'notificationPreferences.mailAriaLabel'
+                        | transloco: { alert: 'alertKind.' + p.kind + '.label' | transloco }
+                    "
                     [checked]="p.email"
                     [disabled]="saving() === p.kind"
                     (change)="toggle(p, 'email', $any($event.target).checked)"
@@ -56,7 +44,10 @@ const DESCRIPTIONS: Record<AlertKind, string> = {
                 <td>
                   <input
                     type="checkbox"
-                    [attr.aria-label]="label(p.kind) + ' in-app'"
+                    [attr.aria-label]="
+                      'notificationPreferences.inAppAriaLabel'
+                        | transloco: { alert: 'alertKind.' + p.kind + '.label' | transloco }
+                    "
                     [checked]="p.inApp"
                     [disabled]="saving() === p.kind"
                     (change)="toggle(p, 'inApp', $any($event.target).checked)"
@@ -80,11 +71,6 @@ export class NotificationPreferences implements OnInit {
   protected readonly preferences = signal<NotificationPreference[]>([]);
   protected readonly loaded = signal(false);
   protected readonly saving = signal<AlertKind | null>(null);
-
-  protected readonly label = alertKindLabel;
-  protected description(kind: AlertKind): string {
-    return DESCRIPTIONS[kind];
-  }
 
   ngOnInit(): void {
     this.reload();

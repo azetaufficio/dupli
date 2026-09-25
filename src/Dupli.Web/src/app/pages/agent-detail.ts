@@ -2,6 +2,7 @@ import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
@@ -77,28 +78,6 @@ function emptyConnectionForm(): ConnectionForm {
 
 const REFRESH_MS = 15_000;
 
-const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
-  RestartAgent: {
-    label: 'Restart agent',
-    confirm:
-      'The agent service will restart as soon as it picks up the request (within 15 minutes).',
-  },
-  RestoreTest: {
-    label: 'Run restore test',
-    confirm:
-      'Restores a sample of files and the latest database dumps into a temporary directory and verifies them.',
-  },
-  Retention: {
-    label: 'Run retention',
-    confirm:
-      'Applies the retention rules of every policy (restic forget + prune). Old snapshots are removed.',
-  },
-  RepositoryCheck: {
-    label: 'Check repository',
-    confirm: 'Runs restic check reading a subset of the data.',
-  },
-};
-
 @Component({
   selector: 'app-agent-detail',
   imports: [
@@ -115,12 +94,13 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
     RouterLink,
     RunsTable,
     SnapshotBrowser,
+    TranslocoModule,
   ],
   template: `
     @if (agent.value(); as a) {
       <div class="page-header">
         <div>
-          <p class="muted"><a routerLink="/agents">Agents</a> /</p>
+          <p class="muted"><a routerLink="/agents">{{ 'agentDetail.breadcrumb' | transloco }}</a> /</p>
           <h1>
             {{ a.name }}
             @if (a.status === 'Active') {
@@ -134,31 +114,35 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
           @if (auth.canOperate()) {
             @if (a.status === 'Pending') {
               <button type="button" class="btn primary" (click)="generateToken(a)">
-                Generate enrollment token
+                {{ 'agentDetail.actions.generateToken' | transloco }}
               </button>
             }
             @if (a.status === 'Disabled') {
-              <button type="button" class="btn primary" (click)="enable(a)">Re-enable</button>
+              <button type="button" class="btn primary" (click)="enable(a)">
+                {{ 'agentDetail.actions.reEnable' | transloco }}
+              </button>
             }
             @if ((a.status === 'Pending' || a.status === 'Disabled') && auth.isOwner()) {
               <button type="button" class="btn danger" (click)="openDeleteForm(a)">
-                Delete agent
+                {{ 'agentDetail.actions.deleteAgent' | transloco }}
               </button>
             }
             @if (a.status === 'Active') {
               <button type="button" class="btn" (click)="runSystemJob(a, 'RestoreTest')">
-                Run restore test
+                {{ 'agentDetail.systemJobs.RestoreTest.label' | transloco }}
               </button>
               <button type="button" class="btn" (click)="runSystemJob(a, 'RepositoryCheck')">
-                Check repository
+                {{ 'agentDetail.systemJobs.RepositoryCheck.label' | transloco }}
               </button>
               <button type="button" class="btn" (click)="runSystemJob(a, 'Retention')">
-                Run retention
+                {{ 'agentDetail.systemJobs.Retention.label' | transloco }}
               </button>
               <button type="button" class="btn" (click)="runSystemJob(a, 'RestartAgent')">
-                Restart agent
+                {{ 'agentDetail.systemJobs.RestartAgent.label' | transloco }}
               </button>
-              <button type="button" class="btn danger" (click)="disable(a)">Disable</button>
+              <button type="button" class="btn danger" (click)="disable(a)">
+                {{ 'agentDetail.actions.disable' | transloco }}
+              </button>
             }
           }
         </div>
@@ -166,19 +150,23 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
 
       @if (token(); as t) {
         <section class="card">
-          <h2>Enrollment token</h2>
+          <h2>{{ 'agentDetail.enrollmentToken.title' | transloco }}</h2>
           <div class="secret-box">
-            <span
-              >Shown only once. Valid until {{ t.expiresAt | datetime }}, single use. Run on the VM
-              as Administrator:</span
-            >
+            <span>{{
+              'agentDetail.enrollmentToken.shownOnce'
+                | transloco: { expires: t.expiresAt | datetime }
+            }}</span>
             <code>{{ installCommand(t) }}</code>
             <div class="toolbar">
               <button type="button" class="btn small" (click)="copy(installCommand(t))">
-                Copy command
+                {{ 'agentDetail.enrollmentToken.copyCommand' | transloco }}
               </button>
-              <button type="button" class="btn small" (click)="copy(t.token)">Copy token</button>
-              <button type="button" class="btn small" (click)="token.set(null)">Done</button>
+              <button type="button" class="btn small" (click)="copy(t.token)">
+                {{ 'agentDetail.enrollmentToken.copyToken' | transloco }}
+              </button>
+              <button type="button" class="btn small" (click)="token.set(null)">
+                {{ 'agentDetail.enrollmentToken.done' | transloco }}
+              </button>
             </div>
           </div>
         </section>
@@ -186,15 +174,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
 
       @if (showDeleteForm()) {
         <section class="card">
-          <h2>Delete agent</h2>
-          <p class="hint">
-            Removes {{ a.name }} and all its policies, jobs, history, logs, alerts, connections and
-            notifications. The repository in the bucket is <strong>not</strong> deleted from the
-            storage provider.
-          </p>
+          <h2>{{ 'agentDetail.actions.deleteAgent' | transloco }}</h2>
+          <p class="hint" [innerHTML]="'agentDetail.deleteForm.hint' | transloco: { name: a.name }"></p>
           <form (ngSubmit)="deleteAgent(a)" #deleteForm="ngForm">
             <label class="field">
-              Type "{{ a.name }}" to confirm
+              {{ 'agentDetail.deleteForm.confirmPrompt' | transloco: { name: a.name } }}
               <input name="deleteConfirmName" [(ngModel)]="deleteConfirmName" required />
             </label>
             @if (deleteError()) {
@@ -206,9 +190,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 class="btn danger"
                 [disabled]="deleteConfirmName !== a.name || deletingAgent()"
               >
-                Delete permanently
+                {{ 'agentDetail.deleteForm.deletePermanently' | transloco }}
               </button>
-              <button type="button" class="btn" (click)="showDeleteForm.set(false)">Cancel</button>
+              <button type="button" class="btn" (click)="showDeleteForm.set(false)">
+                {{ 'common.cancel' | transloco }}
+              </button>
             </div>
           </form>
         </section>
@@ -217,39 +203,39 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
       <section class="card">
         <dl class="facts">
           <div>
-            <dt>Hostname</dt>
+            <dt>{{ 'agentDetail.facts.hostname' | transloco }}</dt>
             <dd>{{ a.hostname ?? '—' }}</dd>
           </div>
           <div>
-            <dt>OS</dt>
+            <dt>{{ 'agentDetail.facts.os' | transloco }}</dt>
             <dd>{{ a.osVersion ?? '—' }}</dd>
           </div>
           <div>
-            <dt>Agent version</dt>
+            <dt>{{ 'agentDetail.facts.agentVersion' | transloco }}</dt>
             <dd class="mono">{{ a.version ?? '—' }}</dd>
           </div>
           <div>
-            <dt>restic version</dt>
+            <dt>{{ 'agentDetail.facts.resticVersion' | transloco }}</dt>
             <dd class="mono">{{ a.resticVersion ?? '—' }}</dd>
           </div>
           <div>
-            <dt>Last heartbeat</dt>
+            <dt>{{ 'agentDetail.facts.lastHeartbeat' | transloco }}</dt>
             <dd [title]="a.lastHeartbeatAt | datetime">{{ a.lastHeartbeatAt | relative }}</dd>
           </div>
           <div>
-            <dt>Last backup</dt>
+            <dt>{{ 'agentDetail.facts.lastBackup' | transloco }}</dt>
             <dd [title]="a.lastBackupAt | datetime">{{ a.lastBackupAt | relative }}</dd>
           </div>
           <div>
-            <dt>Free disk space</dt>
+            <dt>{{ 'agentDetail.facts.freeDiskSpace' | transloco }}</dt>
             <dd>{{ a.freeDiskSpace | bytes }}</dd>
           </div>
           <div>
-            <dt>Enrolled</dt>
+            <dt>{{ 'agentDetail.facts.enrolled' | transloco }}</dt>
             <dd>{{ a.enrolledAt | datetime }}</dd>
           </div>
           <div>
-            <dt>Created</dt>
+            <dt>{{ 'agentDetail.facts.created' | transloco }}</dt>
             <dd>{{ a.createdAt | datetime }}</dd>
           </div>
         </dl>
@@ -257,35 +243,40 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
 
       <section class="card">
         <div class="card-header">
-          <h2>Repository</h2>
+          <h2>{{ 'agentDetail.repository.title' | transloco }}</h2>
           @if (auth.isOwner()) {
             <button type="button" class="btn small" (click)="openCredentialsForm(a)">
-              Update credentials
+              {{ 'agentDetail.repository.updateCredentials' | transloco }}
             </button>
           }
         </div>
         <dl class="facts">
           <div>
-            <dt>Endpoint / bucket</dt>
+            <dt>{{ 'agentDetail.repository.endpointBucket' | transloco }}</dt>
             <dd class="mono">{{ storageLabel() }}</dd>
           </div>
           <div>
-            <dt>Prefix</dt>
+            <dt>{{ 'agentDetail.repository.prefix' | transloco }}</dt>
             <dd class="mono">{{ a.storagePrefix }}</dd>
           </div>
           <div>
-            <dt>Access key ID</dt>
+            <dt>{{ 'agentDetail.repository.accessKeyId' | transloco }}</dt>
             <dd class="mono">{{ a.s3AccessKeyId }}</dd>
           </div>
           <div>
-            <dt>Credentials status</dt>
+            <dt>{{ 'agentDetail.repository.credentialsStatus' | transloco }}</dt>
             <dd>
               <app-badge
                 [value]="storageCredentialsStatus()"
                 [text]="storageCredentialsStatusText()"
               />
               @if (a.s3CredentialsUpdatedAt) {
-                <span class="muted"> — updated {{ a.s3CredentialsUpdatedAt | datetime }}</span>
+                <span class="muted">
+                  {{
+                    'agentDetail.repository.updatedAt'
+                      | transloco: { date: a.s3CredentialsUpdatedAt | datetime }
+                  }}
+                </span>
               }
             </dd>
           </div>
@@ -295,11 +286,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
           <form (ngSubmit)="saveStorageCredentials(a)" #credForm="ngForm">
             <div class="form-row">
               <label class="field">
-                Access key ID
+                {{ 'agentDetail.repository.accessKeyId' | transloco }}
                 <input name="credAccessKeyId" [(ngModel)]="credentialsForm.accessKeyId" required />
               </label>
               <label class="field">
-                Secret access key
+                {{ 'agentDetail.credentialsForm.secretAccessKey' | transloco }}
                 <input
                   type="password"
                   name="credSecretAccessKey"
@@ -315,12 +306,15 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 name="credSkipVerification"
                 [(ngModel)]="credentialsForm.skipVerification"
               />
-              Skip verification (do not try to list the repository with the new key first)
+              {{ 'agentDetail.credentialsForm.skipVerification' | transloco }}
             </label>
-            <p class="hint">
-              Revoke the old key with the storage provider only once the status above reads
-              "Applied by the agent".
-            </p>
+            <p
+              class="hint"
+              [innerHTML]="
+                'agentDetail.credentialsForm.revokeHint'
+                  | transloco: { status: 'agentDetail.status.applied' | transloco }
+              "
+            ></p>
             @if (credentialsError()) {
               <div class="error-box">{{ credentialsError() }}</div>
             }
@@ -330,9 +324,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 class="btn primary"
                 [disabled]="credForm.invalid || savingCredentials()"
               >
-                Save
+                {{ 'common.save' | transloco }}
               </button>
-              <button type="button" class="btn" (click)="cancelCredentialsForm()">Cancel</button>
+              <button type="button" class="btn" (click)="cancelCredentialsForm()">
+                {{ 'common.cancel' | transloco }}
+              </button>
             </div>
           </form>
         }
@@ -340,39 +336,43 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
 
       <div class="tabs" role="tablist">
         <button type="button" [class.active]="tab() === 'policies'" (click)="tab.set('policies')">
-          Policies<span class="count">{{ policies.value()?.length ?? 0 }}</span>
+          {{ 'agentDetail.tabs.policies' | transloco }}<span class="count">{{
+            policies.value()?.length ?? 0
+          }}</span>
         </button>
         <button
           type="button"
           [class.active]="tab() === 'connections'"
           (click)="tab.set('connections')"
         >
-          Connections<span class="count">{{ connections.value()?.length ?? 0 }}</span>
+          {{ 'agentDetail.tabs.connections' | transloco }}<span class="count">{{
+            connections.value()?.length ?? 0
+          }}</span>
         </button>
         <button type="button" [class.active]="tab() === 'snapshots'" (click)="tab.set('snapshots')">
-          Snapshots
+          {{ 'agentDetail.tabs.snapshots' | transloco }}
         </button>
         <button type="button" [class.active]="tab() === 'jobs'" (click)="tab.set('jobs')">
-          Jobs
+          {{ 'agentDetail.tabs.jobs' | transloco }}
         </button>
         <button type="button" [class.active]="tab() === 'history'" (click)="tab.set('history')">
-          Backup history
+          {{ 'agentDetail.tabs.history' | transloco }}
         </button>
         <button
           type="button"
           [class.active]="tab() === 'restore-tests'"
           (click)="tab.set('restore-tests')"
         >
-          Restore tests
+          {{ 'agentDetail.tabs.restoreTests' | transloco }}
         </button>
         <button type="button" [class.active]="tab() === 'logs'" (click)="tab.set('logs')">
-          Logs
+          {{ 'agentDetail.tabs.logs' | transloco }}
         </button>
         <button type="button" [class.active]="tab() === 'alerts'" (click)="tab.set('alerts')">
-          Alerts<span class="count">{{ openAlertCount() }}</span>
+          {{ 'agentDetail.tabs.alerts' | transloco }}<span class="count">{{ openAlertCount() }}</span>
         </button>
         <button type="button" [class.active]="tab() === 'updates'" (click)="tab.set('updates')">
-          Updates
+          {{ 'agentDetail.tabs.updates' | transloco }}
         </button>
       </div>
 
@@ -380,7 +380,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         @case ('policies') {
           <section class="card flush">
             <div class="card-header">
-              <h2>Backup policies</h2>
+              <h2>{{ 'agentDetail.policiesTab.title' | transloco }}</h2>
               @if (auth.canOperate()) {
                 <div class="toolbar">
                   <button
@@ -389,27 +389,27 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                     [disabled]="a.status !== 'Active' || runningAll()"
                     (click)="runAllPolicies(a)"
                   >
-                    Run all
+                    {{ 'agentDetail.policiesTab.runAll' | transloco }}
                   </button>
-                  <a class="btn primary small" [routerLink]="['/agents', a.id, 'policies', 'new']"
-                    >New policy</a
-                  >
+                  <a class="btn primary small" [routerLink]="['/agents', a.id, 'policies', 'new']">{{
+                    'agentDetail.policiesTab.newPolicy' | transloco
+                  }}</a>
                 </div>
               }
             </div>
             @if ((policies.value() ?? []).length === 0) {
-              <div class="empty">No policies. Nothing is backed up for this agent yet.</div>
+              <div class="empty">{{ 'agentDetail.policiesTab.empty' | transloco }}</div>
             } @else {
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Sources</th>
-                      <th>Schedule</th>
-                      <th>Next run</th>
-                      <th>Retention</th>
-                      <th>Enabled</th>
+                      <th>{{ 'agentDetail.policiesTab.table.name' | transloco }}</th>
+                      <th>{{ 'agentDetail.policiesTab.table.sources' | transloco }}</th>
+                      <th>{{ 'agentDetail.policiesTab.table.schedule' | transloco }}</th>
+                      <th>{{ 'agentDetail.policiesTab.table.nextRun' | transloco }}</th>
+                      <th>{{ 'agentDetail.policiesTab.table.retention' | transloco }}</th>
+                      <th>{{ 'agentDetail.policiesTab.table.enabled' | transloco }}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -423,12 +423,15 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                           @for (s of p.sources; track s.sourceId) {
                             <div>
                               <span class="badge tone-muted">{{
-                                s.type === 'directory' ? 'dir' : 'pg'
+                                s.type === 'directory'
+                                  ? ('agentDetail.policiesTab.sourceType.dir' | transloco)
+                                  : ('agentDetail.policiesTab.sourceType.pg' | transloco)
                               }}</span>
                               {{
                                 s.type === 'directory'
                                   ? s.paths.join(', ')
-                                  : (connectionNames()[s.connectionId] ?? 'unknown connection')
+                                  : (connectionNames()[s.connectionId] ??
+                                    ('agentDetail.policiesTab.unknownConnection' | transloco))
                               }}
                             </div>
                           }
@@ -444,7 +447,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                         <td>
                           <app-badge
                             [value]="p.enabled ? 'Active' : 'Disabled'"
-                            [text]="p.enabled ? 'Yes' : 'No'"
+                            [text]="(p.enabled ? 'common.yes' : 'common.no') | transloco"
                           />
                         </td>
                         <td class="num">
@@ -455,7 +458,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                               [disabled]="a.status !== 'Active'"
                               (click)="runPolicy(p)"
                             >
-                              Run now
+                              {{ 'agentDetail.policiesTab.runNow' | transloco }}
                             </button>
                           }
                         </td>
@@ -470,27 +473,37 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         @case ('connections') {
           @if (auth.canOperate()) {
             <section class="card form">
-              <h2>{{ editingConnectionId() ? 'Edit connection' : 'New connection' }}</h2>
+              <h2>{{
+                (editingConnectionId()
+                  ? 'agentDetail.connectionsTab.editTitle'
+                  : 'agentDetail.connectionsTab.newTitle'
+                ) | transloco
+              }}</h2>
               <form (ngSubmit)="saveConnection(a.id)" #connForm="ngForm">
                 <div class="form-row">
                   <label class="field"
-                    >Name <input name="connName" [(ngModel)]="connectionForm.name" required
+                    >{{ 'agentDetail.connectionsTab.table.name' | transloco }}
+                    <input name="connName" [(ngModel)]="connectionForm.name" required
                   /></label>
                   <label class="field"
-                    >Host <input name="connHost" [(ngModel)]="connectionForm.host" required
+                    >{{ 'agentDetail.connectionsTab.table.host' | transloco }}
+                    <input name="connHost" [(ngModel)]="connectionForm.host" required
                   /></label>
                   <label class="field"
-                    >Port
+                    >{{ 'agentDetail.connectionsTab.table.port' | transloco }}
                     <input type="number" name="connPort" [(ngModel)]="connectionForm.port" required
                   /></label>
                 </div>
                 <div class="form-row">
                   <label class="field"
-                    >Username <input name="connUser" [(ngModel)]="connectionForm.username" required
+                    >{{ 'agentDetail.connectionsTab.table.username' | transloco }}
+                    <input name="connUser" [(ngModel)]="connectionForm.username" required
                   /></label>
                   <label class="field">
-                    pg_dump directory
-                    <span class="hint">Optional. Auto-detected from the registry when empty.</span>
+                    {{ 'agentDetail.connectionsTab.binDirectory' | transloco }}
+                    <span class="hint">{{
+                      'agentDetail.connectionsTab.binDirectoryHint' | transloco
+                    }}</span>
                     <input
                       name="connBin"
                       [(ngModel)]="connectionForm.binDirectory"
@@ -500,11 +513,16 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 </div>
                 <div class="form-row">
                   <label class="field">
-                    Password
+                    {{ 'agentDetail.connectionsTab.table.password' | transloco }}
                     @if (editingConnectionId()) {
                       <app-badge
                         [value]="editingConnectionPasswordSet() ? 'Active' : 'Disabled'"
-                        [text]="editingConnectionPasswordSet() ? 'Set' : 'Missing'"
+                        [text]="
+                          (editingConnectionPasswordSet()
+                            ? 'agentDetail.connectionsTab.passwordSet'
+                            : 'agentDetail.connectionsTab.passwordMissing'
+                          ) | transloco
+                        "
                       />
                     }
                     <input
@@ -514,9 +532,10 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                       [(ngModel)]="connectionForm.password"
                     />
                     <span class="hint">{{
-                      editingConnectionId()
-                        ? 'Write-only: leave empty to keep the current password.'
-                        : 'Write-only: never shown again once saved.'
+                      (editingConnectionId()
+                        ? 'agentDetail.connectionsTab.passwordHintEditing'
+                        : 'agentDetail.connectionsTab.passwordHintNew'
+                      ) | transloco
                     }}</span>
                   </label>
                 </div>
@@ -529,11 +548,16 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                     class="btn primary"
                     [disabled]="connForm.invalid || savingConnection()"
                   >
-                    {{ editingConnectionId() ? 'Save changes' : 'Add connection' }}
+                    {{
+                      (editingConnectionId()
+                        ? 'agentDetail.connectionsTab.saveChanges'
+                        : 'agentDetail.connectionsTab.addConnection'
+                      ) | transloco
+                    }}
                   </button>
                   @if (editingConnectionId()) {
                     <button type="button" class="btn" (click)="cancelEditConnection()">
-                      Cancel
+                      {{ 'common.cancel' | transloco }}
                     </button>
                   }
                 </div>
@@ -542,22 +566,20 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
           }
 
           <section class="card flush">
-            <div class="card-header"><h2>Connections</h2></div>
+            <div class="card-header"><h2>{{ 'agentDetail.tabs.connections' | transloco }}</h2></div>
             @if ((connections.value() ?? []).length === 0) {
-              <div class="empty">
-                No PostgreSQL connections. Add one, then reference it from a policy source.
-              </div>
+              <div class="empty">{{ 'agentDetail.connectionsTab.empty' | transloco }}</div>
             } @else {
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Host</th>
-                      <th>Port</th>
-                      <th>Username</th>
-                      <th>Password</th>
-                      <th>pg_dump dir</th>
+                      <th>{{ 'agentDetail.connectionsTab.table.name' | transloco }}</th>
+                      <th>{{ 'agentDetail.connectionsTab.table.host' | transloco }}</th>
+                      <th>{{ 'agentDetail.connectionsTab.table.port' | transloco }}</th>
+                      <th>{{ 'agentDetail.connectionsTab.table.username' | transloco }}</th>
+                      <th>{{ 'agentDetail.connectionsTab.table.password' | transloco }}</th>
+                      <th>{{ 'agentDetail.connectionsTab.table.pgDumpDir' | transloco }}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -571,21 +593,26 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                         <td>
                           <app-badge
                             [value]="c.passwordSet ? 'Active' : 'Disabled'"
-                            [text]="c.passwordSet ? 'Set' : 'Missing'"
+                            [text]="
+                              (c.passwordSet
+                                ? 'agentDetail.connectionsTab.passwordSet'
+                                : 'agentDetail.connectionsTab.passwordMissing'
+                              ) | transloco
+                            "
                           />
                         </td>
                         <td class="mono">{{ c.binDirectory ?? '—' }}</td>
                         <td class="num">
                           @if (auth.canOperate()) {
                             <button type="button" class="btn small" (click)="editConnection(c)">
-                              Edit
+                              {{ 'common.edit' | transloco }}
                             </button>
                             <button
                               type="button"
                               class="btn small danger"
                               (click)="deleteConnection(c)"
                             >
-                              Delete
+                              {{ 'common.delete' | transloco }}
                             </button>
                           }
                         </td>
@@ -613,7 +640,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                   [disabled]="jobs.loadingMore()"
                   (click)="jobs.loadMore()"
                 >
-                  {{ jobs.loadingMore() ? 'Loading…' : 'Load more' }}
+                  {{ (jobs.loadingMore() ? 'common.loading' : 'agentDetail.loadMore') | transloco }}
                 </button>
               </div>
             }
@@ -630,7 +657,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                   [disabled]="runs.loadingMore()"
                   (click)="runs.loadMore()"
                 >
-                  {{ runs.loadingMore() ? 'Loading…' : 'Load more' }}
+                  {{ (runs.loadingMore() ? 'common.loading' : 'agentDetail.loadMore') | transloco }}
                 </button>
               </div>
             }
@@ -639,20 +666,18 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         @case ('restore-tests') {
           <section class="card flush">
             @if (restoreTests.items().length === 0) {
-              <div class="empty">
-                No restore test yet. They run weekly, or use "Run restore test".
-              </div>
+              <div class="empty">{{ 'agentDetail.restoreTestsTab.empty' | transloco }}</div>
             } @else {
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Scheduled</th>
-                      <th>Trigger</th>
-                      <th>Result</th>
-                      <th>Duration</th>
-                      <th>Checks</th>
-                      <th>Error</th>
+                      <th>{{ 'agentDetail.restoreTestsTab.table.scheduled' | transloco }}</th>
+                      <th>{{ 'agentDetail.restoreTestsTab.table.trigger' | transloco }}</th>
+                      <th>{{ 'agentDetail.restoreTestsTab.table.result' | transloco }}</th>
+                      <th>{{ 'agentDetail.restoreTestsTab.table.duration' | transloco }}</th>
+                      <th>{{ 'agentDetail.restoreTestsTab.table.checks' | transloco }}</th>
+                      <th>{{ 'agentDetail.restoreTestsTab.table.error' | transloco }}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -663,12 +688,20 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                         <td>{{ t.trigger }}</td>
                         <td><app-badge [value]="t.state" /></td>
                         <td class="nowrap">{{ t.startedAt | duration: t.completedAt }}</td>
-                        <td class="nowrap">{{ passed(t) }} / {{ t.items.length }} passed</td>
+                        <td class="nowrap">{{
+                          'agentDetail.restoreTestsTab.passed'
+                            | transloco: { passed: passed(t), total: t.items.length }
+                        }}</td>
                         <td class="muted">{{ t.error }}</td>
                         <td class="num">
                           @if (t.items.length > 0) {
                             <button type="button" class="link" (click)="toggleTest(t.id)">
-                              {{ isTestExpanded(t.id, first) ? 'Hide' : 'Details' }}
+                              {{
+                                (isTestExpanded(t.id, first)
+                                  ? 'agentDetail.restoreTestsTab.hide'
+                                  : 'agentDetail.restoreTestsTab.details'
+                                ) | transloco
+                              }}
                             </button>
                           }
                         </td>
@@ -691,7 +724,10 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                   [disabled]="restoreTests.loadingMore()"
                   (click)="restoreTests.loadMore()"
                 >
-                  {{ restoreTests.loadingMore() ? 'Loading…' : 'Load more' }}
+                  {{
+                    (restoreTests.loadingMore() ? 'common.loading' : 'agentDetail.loadMore')
+                      | transloco
+                  }}
                 </button>
               </div>
             }
@@ -700,16 +736,16 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         @case ('logs') {
           <section class="card flush">
             <div class="card-header">
-              <h2>Logs</h2>
+              <h2>{{ 'agentDetail.tabs.logs' | transloco }}</h2>
               <select
                 [ngModel]="logLevel()"
                 (ngModelChange)="logLevel.set($event)"
                 style="width: auto"
               >
-                <option value="">All levels</option>
-                <option value="Information">Information</option>
-                <option value="Warning">Warning</option>
-                <option value="Error">Error</option>
+                <option value="">{{ 'logs.allLevels' | transloco }}</option>
+                <option value="Information">{{ 'logs.levels.information' | transloco }}</option>
+                <option value="Warning">{{ 'logs.levels.warning' | transloco }}</option>
+                <option value="Error">{{ 'logs.levels.error' | transloco }}</option>
               </select>
             </div>
             <app-logs-table [logs]="logs.items()" />
@@ -721,7 +757,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                   [disabled]="logs.loadingMore()"
                   (click)="logs.loadMore()"
                 >
-                  {{ logs.loadingMore() ? 'Loading…' : 'Load more' }}
+                  {{ (logs.loadingMore() ? 'common.loading' : 'agentDetail.loadMore') | transloco }}
                 </button>
               </div>
             }
@@ -736,53 +772,53 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
           <section class="card">
             <dl class="facts">
               <div>
-                <dt>Platform</dt>
+                <dt>{{ 'agentDetail.updatesTab.platform' | transloco }}</dt>
                 <dd class="mono">{{ a.platform }}</dd>
               </div>
               <div>
-                <dt>Launcher managed</dt>
+                <dt>{{ 'agentDetail.updatesTab.launcherManaged' | transloco }}</dt>
                 <dd>
                   <app-badge
                     [value]="a.launcherManaged ? 'Active' : 'Disabled'"
-                    [text]="a.launcherManaged ? 'Yes' : 'No'"
+                    [text]="(a.launcherManaged ? 'common.yes' : 'common.no') | transloco"
                   />
                 </dd>
               </div>
               <div>
-                <dt>Channel</dt>
+                <dt>{{ 'agentDetail.updatesTab.channel' | transloco }}</dt>
                 <dd class="mono">{{ a.channel }}</dd>
               </div>
               <div>
-                <dt>Agent version (running / desired)</dt>
+                <dt>{{ 'agentDetail.updatesTab.agentVersionRunningDesired' | transloco }}</dt>
                 <dd class="mono">{{ a.version ?? '—' }} / {{ a.desiredAgentVersion ?? '—' }}</dd>
               </div>
               <div>
-                <dt>restic version (running / desired)</dt>
+                <dt>{{ 'agentDetail.updatesTab.resticVersionRunningDesired' | transloco }}</dt>
                 <dd class="mono">
                   {{ a.resticVersion ?? '—' }} / {{ a.desiredResticVersion ?? '—' }}
                 </dd>
               </div>
               <div>
-                <dt>Last update</dt>
+                <dt>{{ 'agentDetail.updatesTab.lastUpdate' | transloco }}</dt>
                 <dd>
                   @if (a.lastUpdateVersion) {
                     <span class="mono">{{ a.lastUpdateVersion }}</span>
                     <app-badge [value]="a.lastUpdateOutcome" />
                     <span class="muted"> — {{ a.lastUpdateAt | datetime }}</span>
                   } @else {
-                    <span class="muted">None</span>
+                    <span class="muted">{{ 'agentDetail.updatesTab.none' | transloco }}</span>
                   }
                 </dd>
               </div>
               @if (a.lastUpdateError) {
                 <div>
-                  <dt>Last update error</dt>
+                  <dt>{{ 'agentDetail.updatesTab.lastUpdateError' | transloco }}</dt>
                   <dd class="error-box">{{ a.lastUpdateError }}</dd>
                 </div>
               }
               @if (a.resticUpdateError) {
                 <div>
-                  <dt>restic update error</dt>
+                  <dt>{{ 'agentDetail.updatesTab.resticUpdateError' | transloco }}</dt>
                   <dd class="error-box">{{ a.resticUpdateError }}</dd>
                 </div>
               }
@@ -791,11 +827,11 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
 
           @if (auth.canOperate()) {
             <section class="card form">
-              <h2>Update settings</h2>
+              <h2>{{ 'agentDetail.updatesTab.updateSettingsTitle' | transloco }}</h2>
               <form (ngSubmit)="saveSettings(a)">
                 <div class="form-row">
                   <label class="field">
-                    Channel
+                    {{ 'agentDetail.updatesTab.channel' | transloco }}
                     <select name="channel" [(ngModel)]="settings.channel">
                       @for (c of channels; track c) {
                         <option [value]="c">{{ c }}</option>
@@ -803,18 +839,18 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                     </select>
                   </label>
                   <label class="field">
-                    Pinned agent version
+                    {{ 'agentDetail.updatesTab.pinnedAgentVersion' | transloco }}
                     <select name="pinnedAgentVersion" [(ngModel)]="settings.pinnedAgentVersion">
-                      <option value="">none (follow channel)</option>
+                      <option value="">{{ 'agentDetail.updatesTab.noneFollowChannel' | transloco }}</option>
                       @for (r of agentReleasesForPlatform(); track r.id) {
                         <option [value]="r.version">{{ r.version }} ({{ r.channel }})</option>
                       }
                     </select>
                   </label>
                   <label class="field">
-                    Pinned restic version
+                    {{ 'agentDetail.updatesTab.pinnedResticVersion' | transloco }}
                     <select name="pinnedResticVersion" [(ngModel)]="settings.pinnedResticVersion">
-                      <option value="">none (follow channel)</option>
+                      <option value="">{{ 'agentDetail.updatesTab.noneFollowChannel' | transloco }}</option>
                       @for (r of resticReleasesForPlatform(); track r.id) {
                         <option [value]="r.version">{{ r.version }}</option>
                       }
@@ -823,7 +859,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                 </div>
                 <div class="toolbar">
                   <button type="submit" class="btn primary" [disabled]="savingSettings()">
-                    Save
+                    {{ 'common.save' | transloco }}
                   </button>
                 </div>
               </form>
@@ -832,9 +868,9 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
         }
       }
     } @else if (agent.isLoading()) {
-      <p class="muted">Loading…</p>
+      <p class="muted">{{ 'common.loading' | transloco }}</p>
     } @else if (agent.error()) {
-      <p class="error-box">Agent not found.</p>
+      <p class="error-box">{{ 'agentDetail.notFound' | transloco }}</p>
     }
   `,
 })
@@ -846,6 +882,7 @@ export class AgentDetailPage {
   private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly tab = signal<Tab>('policies');
   protected readonly logLevel = signal('');
@@ -944,11 +981,11 @@ export class AgentDetailPage {
   protected readonly storageCredentialsStatusText = computed(() => {
     switch (this.storageCredentialsStatus()) {
       case 'Active':
-        return 'Applied by the agent';
+        return this.transloco.translate('agentDetail.status.applied');
       case 'Missed':
-        return 'Agent too old for automatic credential updates';
+        return this.transloco.translate('agentDetail.status.tooOldForCredentials');
       default:
-        return 'Waiting for the agent to apply them';
+        return this.transloco.translate('agentDetail.status.waitingForAgent');
     }
   });
 
@@ -1028,9 +1065,9 @@ export class AgentDetailPage {
   protected async copy(text: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(text);
-      this.toasts.success('Copied to clipboard');
+      this.toasts.success(this.transloco.translate('agentDetail.toasts.copiedToClipboard'));
     } catch {
-      this.toasts.error('Clipboard not available: select the text and copy it manually');
+      this.toasts.error(this.transloco.translate('agentDetail.toasts.clipboardUnavailable'));
     }
   }
 
@@ -1039,11 +1076,11 @@ export class AgentDetailPage {
   }
 
   protected async runSystemJob(a: Agent, type: SystemJobType): Promise<void> {
-    const job = SYSTEM_JOBS[type];
-    if (!(await this.confirm.ask(`${job.label}?`, job.confirm, { confirmLabel: job.label })))
-      return;
+    const label = this.transloco.translate(`agentDetail.systemJobs.${type}.label`);
+    const message = this.transloco.translate(`agentDetail.systemJobs.${type}.confirm`);
+    if (!(await this.confirm.ask(`${label}?`, message, { confirmLabel: label }))) return;
     this.api.runSystemJob(a.id, type).subscribe(() => {
-      this.toasts.success(`${job.label}: queued`);
+      this.toasts.success(this.transloco.translate('agentDetail.toasts.jobQueued', { label }));
       this.jobs.reload();
       this.restoreTests.reload();
     });
@@ -1051,26 +1088,28 @@ export class AgentDetailPage {
 
   protected async disable(a: Agent): Promise<void> {
     const ok = await this.confirm.ask(
-      `Disable ${a.name}?`,
-      'The agent can no longer authenticate and no job is scheduled for it. Re-enabling requires a new enrollment token.',
-      { confirmLabel: 'Disable', danger: true },
+      this.transloco.translate('agentDetail.confirms.disableAgentTitle', { name: a.name }),
+      this.transloco.translate('agentDetail.confirms.disableAgentBody'),
+      { confirmLabel: this.transloco.translate('agentDetail.actions.disable'), danger: true },
     );
     if (!ok) return;
     this.api.disableAgent(a.id).subscribe(() => {
-      this.toasts.success(`${a.name} disabled`);
+      this.toasts.success(this.transloco.translate('agentDetail.toasts.agentDisabled', { name: a.name }));
       this.agent.reload();
     });
   }
 
   protected async enable(a: Agent): Promise<void> {
     const ok = await this.confirm.ask(
-      `Re-enable ${a.name}?`,
-      'The agent goes back to Pending: generate a new enrollment token and run the install command on the VM again.',
-      { confirmLabel: 'Re-enable' },
+      this.transloco.translate('agentDetail.confirms.enableAgentTitle', { name: a.name }),
+      this.transloco.translate('agentDetail.confirms.enableAgentBody'),
+      { confirmLabel: this.transloco.translate('agentDetail.actions.reEnable') },
     );
     if (!ok) return;
     this.api.enableAgent(a.id).subscribe(() => {
-      this.toasts.success(`${a.name} is pending enrollment`);
+      this.toasts.success(
+        this.transloco.translate('agentDetail.toasts.agentPendingEnrollment', { name: a.name }),
+      );
       this.agent.reload();
     });
   }
@@ -1087,7 +1126,7 @@ export class AgentDetailPage {
     this.deleteError.set(null);
     this.api.deleteAgent(a.id).subscribe({
       next: () => {
-        this.toasts.success(`${a.name} deleted`);
+        this.toasts.success(this.transloco.translate('agentDetail.toasts.agentDeleted', { name: a.name }));
         this.router.navigate(['/agents']);
       },
       error: (e) => {
@@ -1098,7 +1137,11 @@ export class AgentDetailPage {
   }
 
   protected runPolicy(p: Policy): void {
-    this.api.runPolicy(p.id).subscribe(() => this.toasts.success(`Backup "${p.name}" queued`));
+    this.api
+      .runPolicy(p.id)
+      .subscribe(() =>
+        this.toasts.success(this.transloco.translate('agentDetail.toasts.backupQueued', { name: p.name })),
+      );
   }
 
   protected runAllPolicies(a: Agent): void {
@@ -1108,8 +1151,11 @@ export class AgentDetailPage {
         this.runningAll.set(false);
         this.toasts.success(
           jobs.length > 0
-            ? `${jobs.length} backup${jobs.length === 1 ? '' : 's'} queued`
-            : 'Nothing to run: every policy already has a pending job',
+            ? this.transloco.translate(
+                jobs.length === 1 ? 'agentDetail.toasts.backupsQueuedOne' : 'agentDetail.toasts.backupsQueuedOther',
+                { count: jobs.length },
+              )
+            : this.transloco.translate('agentDetail.toasts.nothingToRun'),
         );
         this.jobs.reload();
       },
@@ -1119,10 +1165,11 @@ export class AgentDetailPage {
 
   protected async cancelJob(job: Job): Promise<void> {
     if (
-      !(await this.confirm.ask('Cancel job?', `${job.type} job will be cancelled.`, {
-        confirmLabel: 'Cancel job',
-        danger: true,
-      }))
+      !(await this.confirm.ask(
+        this.transloco.translate('agentDetail.confirms.cancelJobTitle'),
+        this.transloco.translate('agentDetail.confirms.cancelJobBody', { type: job.type }),
+        { confirmLabel: this.transloco.translate('agentDetail.confirms.cancelJobConfirm'), danger: true },
+      ))
     )
       return;
     this.api.cancelJob(job.id).subscribe(() => this.jobs.reload());
@@ -1157,7 +1204,7 @@ export class AgentDetailPage {
       .updateAgentSettings(a.id, request, new HttpContext().set(SILENT_ERRORS, true))
       .subscribe({
         next: () => {
-          this.toasts.success('Update settings saved');
+          this.toasts.success(this.transloco.translate('agentDetail.toasts.settingsSaved'));
           this.savingSettings.set(false);
           this.settingsReady.set(false);
           this.agent.reload();
@@ -1209,7 +1256,9 @@ export class AgentDetailPage {
     this.connectionError.set(null);
     call.subscribe({
       next: (connection) => {
-        this.toasts.success(`Connection "${connection.name}" saved`);
+        this.toasts.success(
+          this.transloco.translate('agentDetail.toasts.connectionSaved', { name: connection.name }),
+        );
         this.savingConnection.set(false);
         this.cancelEditConnection();
         this.connections.reload();
@@ -1223,13 +1272,13 @@ export class AgentDetailPage {
 
   protected async deleteConnection(c: PgConnection): Promise<void> {
     const ok = await this.confirm.ask(
-      `Delete connection "${c.name}"?`,
-      'Fails if a policy source still uses it for PostgreSQL backups.',
-      { confirmLabel: 'Delete', danger: true },
+      this.transloco.translate('agentDetail.confirms.deleteConnectionTitle', { name: c.name }),
+      this.transloco.translate('agentDetail.confirms.deleteConnectionBody'),
+      { confirmLabel: this.transloco.translate('common.delete'), danger: true },
     );
     if (!ok) return;
     this.api.deleteConnection(c.id).subscribe(() => {
-      this.toasts.success('Connection deleted');
+      this.toasts.success(this.transloco.translate('agentDetail.toasts.connectionDeleted'));
       this.connections.reload();
     });
   }
@@ -1257,7 +1306,7 @@ export class AgentDetailPage {
       .updateAgentStorageCredentials(a.id, request, new HttpContext().set(SILENT_ERRORS, true))
       .subscribe({
         next: () => {
-          this.toasts.success('Storage credentials updated');
+          this.toasts.success(this.transloco.translate('agentDetail.toasts.credentialsUpdated'));
           this.savingCredentials.set(false);
           this.showCredentialsForm.set(false);
           this.agent.reload();

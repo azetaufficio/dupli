@@ -1,8 +1,8 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { OperatorNotification } from '../core/models';
-import { alertKindLabel } from '../shared/notification-preferences';
 import { DateTimePipe, RelativeTimePipe } from '../shared/format';
 
 const PAGE_SIZE = 50;
@@ -10,12 +10,12 @@ const PAGE_SIZE = 50;
 /** Paginated feed behind the bell: unread filter, mark-as-read on click, then off to the agent or policy. */
 @Component({
   selector: 'app-notifications',
-  imports: [DateTimePipe, RelativeTimePipe],
+  imports: [DateTimePipe, RelativeTimePipe, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Notifications</h1>
-        <p class="muted">Alert opens and resolutions you are subscribed to.</p>
+        <h1>{{ 'notifications.title' | transloco }}</h1>
+        <p class="muted">{{ 'notifications.subtitle' | transloco }}</p>
       </div>
       <div class="toolbar">
         <button
@@ -24,7 +24,7 @@ const PAGE_SIZE = 50;
           [class.primary]="unreadOnly()"
           (click)="setUnreadOnly(true)"
         >
-          Unread
+          {{ 'notifications.unread' | transloco }}
         </button>
         <button
           type="button"
@@ -32,16 +32,18 @@ const PAGE_SIZE = 50;
           [class.primary]="!unreadOnly()"
           (click)="setUnreadOnly(false)"
         >
-          All
+          {{ 'notifications.all' | transloco }}
         </button>
         @if (items().some((n) => !n.readAt)) {
-          <button type="button" class="btn small" (click)="markAllRead()">Mark all read</button>
+          <button type="button" class="btn small" (click)="markAllRead()">
+            {{ 'notifications.markAllRead' | transloco }}
+          </button>
         }
       </div>
     </div>
     <section class="card flush">
       @if (items().length === 0 && !loading()) {
-        <div class="empty">No notifications.</div>
+        <div class="empty">{{ 'notifications.empty' | transloco }}</div>
       } @else {
         <ul class="notification-list">
           @for (n of items(); track n.id) {
@@ -60,7 +62,7 @@ const PAGE_SIZE = 50;
       @if (hasMore()) {
         <div class="toolbar" style="padding: 0.75rem">
           <button type="button" class="btn" [disabled]="loading()" (click)="loadMore()">
-            Load more
+            {{ 'notifications.loadMore' | transloco }}
           </button>
         </div>
       }
@@ -99,6 +101,7 @@ const PAGE_SIZE = 50;
 export class NotificationsPage implements OnInit {
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly items = signal<OperatorNotification[]>([]);
   protected readonly unreadOnly = signal(false);
@@ -106,7 +109,9 @@ export class NotificationsPage implements OnInit {
   protected readonly hasMore = signal(false);
 
   protected readonly label = (n: OperatorNotification) =>
-    `${alertKindLabel(n.kind)} · ${n.event === 'Resolved' ? 'resolved' : 'opened'}`;
+    `${this.transloco.translate('alertKind.' + n.kind + '.label')} · ${this.transloco.translate(
+      n.event === 'Resolved' ? 'notifications.resolved' : 'notifications.opened',
+    )}`;
 
   ngOnInit(): void {
     this.load(true);

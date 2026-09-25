@@ -1,6 +1,7 @@
 import { HttpContext, httpResource } from '@angular/common/http';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { TranslocoModule, TranslocoService } from '@jsverse/transloco';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { problemMessage, SILENT_ERRORS } from '../core/http-errors.interceptor';
@@ -9,28 +10,26 @@ import { ToastService } from '../core/toast.service';
 
 @Component({
   selector: 'app-storage',
-  imports: [FormsModule],
+  imports: [FormsModule, TranslocoModule],
   template: `
     <div class="page-header">
       <div>
-        <h1>Storage targets</h1>
-        <p class="muted">
-          S3 endpoint + bucket shared by agents. Each agent writes under its own prefix with its own
-          key.
-        </p>
+        <h1>{{ 'storage.title' | transloco }}</h1>
+        <p class="muted">{{ 'storage.subtitle' | transloco }}</p>
       </div>
     </div>
 
     @if (auth.isOwner()) {
       <section class="card">
-        <h2>New storage target</h2>
+        <h2>{{ 'storage.newTarget' | transloco }}</h2>
         <form class="form" (ngSubmit)="create()" #f="ngForm">
           <div class="form-row">
             <label class="field"
-              >Name <input name="name" [(ngModel)]="form.name" required placeholder="wasabi-eu"
+              >{{ 'storage.form.name' | transloco }}
+              <input name="name" [(ngModel)]="form.name" required placeholder="wasabi-eu"
             /></label>
             <label class="field">
-              Endpoint
+              {{ 'storage.form.endpoint' | transloco }}
               <input
                 name="endpoint"
                 type="url"
@@ -40,10 +39,12 @@ import { ToastService } from '../core/toast.service';
               />
             </label>
             <label class="field"
-              >Bucket <input name="bucket" [(ngModel)]="form.bucket" required
+              >{{ 'storage.form.bucket' | transloco }}
+              <input name="bucket" [(ngModel)]="form.bucket" required
             /></label>
             <label class="field"
-              >Region <span class="hint">Optional</span
+              >{{ 'storage.form.region' | transloco }}
+              <span class="hint">{{ 'storage.form.optional' | transloco }}</span
               ><input name="region" [(ngModel)]="form.region"
             /></label>
           </div>
@@ -52,12 +53,9 @@ import { ToastService } from '../core/toast.service';
           }
           <div class="toolbar">
             <button type="submit" class="btn primary" [disabled]="f.invalid || saving()">
-              Create
+              {{ 'storage.form.create' | transloco }}
             </button>
-            <span class="muted"
-              >Enable bucket versioning and a lifecycle rule for noncurrent versions on the provider
-              side.</span
-            >
+            <span class="muted">{{ 'storage.form.versioningHint' | transloco }}</span>
           </div>
         </form>
       </section>
@@ -65,16 +63,16 @@ import { ToastService } from '../core/toast.service';
 
     <section class="card flush">
       @if ((targets.value() ?? []).length === 0) {
-        <div class="empty">No storage targets.</div>
+        <div class="empty">{{ 'storage.empty' | transloco }}</div>
       } @else {
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Endpoint</th>
-                <th>Bucket</th>
-                <th>Region</th>
+                <th>{{ 'storage.table.name' | transloco }}</th>
+                <th>{{ 'storage.table.endpoint' | transloco }}</th>
+                <th>{{ 'storage.table.bucket' | transloco }}</th>
+                <th>{{ 'storage.table.region' | transloco }}</th>
               </tr>
             </thead>
             <tbody>
@@ -97,6 +95,7 @@ export class StoragePage {
   protected readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
   private readonly toasts = inject(ToastService);
+  private readonly transloco = inject(TranslocoService);
 
   protected readonly targets = httpResource<StorageTarget[]>(() => '/api/admin/storage-targets');
   protected readonly saving = signal(false);
@@ -109,7 +108,7 @@ export class StoragePage {
     const request = { ...this.form, region: this.form.region || null };
     this.api.createStorageTarget(request, new HttpContext().set(SILENT_ERRORS, true)).subscribe({
       next: (t) => {
-        this.toasts.success(`Storage target ${t.name} created`);
+        this.toasts.success(this.transloco.translate('storage.created', { name: t.name }));
         this.form = { name: '', endpoint: '', bucket: '', region: null };
         this.saving.set(false);
         this.targets.reload();

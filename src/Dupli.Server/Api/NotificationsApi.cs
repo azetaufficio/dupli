@@ -25,6 +25,25 @@ public static class NotificationsApi
         me.MapPost("/notifications/read-all", MarkAllReadAsync);
         me.MapGet("/notification-preferences", GetMyPreferencesAsync);
         me.MapPut("/notification-preferences", SetMyPreferencesAsync);
+        me.MapPut("/language", SetMyLanguageAsync);
+    }
+
+    private static readonly string[] SupportedLanguages = ["en", "it"];
+
+    private static async Task<IResult> SetMyLanguageAsync(
+        SetLanguageRequest request, ClaimsPrincipal user, DupliDbContext db, OperatorDirectory directory, TimeProvider time, CancellationToken ct)
+    {
+        if (request.Language is not { } language || !SupportedLanguages.Contains(language))
+            throw ApiException.BadRequest($"language must be one of: {string.Join(", ", SupportedLanguages)}");
+
+        var userId = CallerId(user);
+        var operatorUser = await db.OperatorUsers.SingleOrDefaultAsync(u => u.Id == userId, ct) ?? throw ApiException.NotFound("User");
+        operatorUser.Language = language;
+        operatorUser.UpdatedAt = time.GetUtcNow();
+        operatorUser.UpdatedBy = OperatorAuth.Actor(user);
+        await db.SaveChangesAsync(ct);
+        directory.Invalidate(operatorUser.Id);
+        return Results.NoContent();
     }
 
     private static Guid CallerId(ClaimsPrincipal user) =>
