@@ -9,9 +9,10 @@ using Dupli.Server.Tests.Infrastructure;
 namespace Dupli.Server.Tests;
 
 /// <summary>
-/// "Desired state via heartbeat" rotation of an agent's S3 key: the admin endpoint (Owner only), the version
-/// bump, the agent-facing endpoint that hands out the new key, and the heartbeat round trip that reports it
-/// as applied. Verification against the real repository (422 on the wrong key) is covered end to end in
+/// Admin-side S3 key rotation: the endpoint (Owner only), the version bump, the secret never appearing in the
+/// admin DTO. There is no agent-facing "fetch the storage credentials" endpoint any more: the agent picks up
+/// the current key with the next job's just-in-time credentials (see <c>JobCredentialsTests</c>).
+/// Verification against the real repository (422 on the wrong key) is covered end to end in
 /// <c>Dupli.IntegrationTests</c>, where a real restic binary and S3 (RustFS) are available.
 /// </summary>
 [Collection(ServerCollection.Name)]
@@ -49,7 +50,7 @@ public sealed class StorageCredentialsTests(PostgresFixture postgres) : IAsyncLi
     }
 
     [Fact]
-    public async Task Owner_can_update_credentials_with_skip_verification_and_the_agent_applies_them()
+    public async Task Owner_can_update_credentials_with_skip_verification_and_the_heartbeat_reports_the_bumped_version()
     {
         var agent = await _server.EnrollAsync();
         var owner = await OwnerAsync();
@@ -67,25 +68,20 @@ public sealed class StorageCredentialsTests(PostgresFixture postgres) : IAsyncLi
         var raw = await (await owner.GetAsync($"/api/admin/agents/{agent.AgentId}")).Content.ReadAsStringAsync();
         Assert.DoesNotContain("new-secret", raw);
 
-        // Heartbeat still on version 1: the server tells it to fetch version 2.
+        // Heartbeat still on version 1: the server tells it a newer key exists. The agent itself no longer
+        // fetches or applies it out of band any more: the next job's credentials already carry "new-secret"
+        // (see JobCredentialsTests), and there is no more agent-facing endpoint to fetch it ahead of a job.
         var heartbeat = await (await agent.Client.PostJsonAsync("/api/agents/heartbeat",
-            new HeartbeatRequest { Hostname = "vm-01", Version = "0.1.0", OsVersion = "Windows", StorageCredentialsVersion = 1 }))
+            new HeartbeatRequest { Hostname = "vm-01", Version = "0.1.0", OsVersion = "Windows" }))
             .ReadAsync<HeartbeatResponse>();
         Assert.Equal(2, heartbeat.StorageCredentialsVersion);
+    }
 
-        // The agent fetches the new key: never cached (Cache-Control: no-store), matches what was saved.
-        var credentialsResponse = await agent.Client.GetAsync("/api/agents/storage-credentials");
-        Assert.Equal("no-store", credentialsResponse.Headers.CacheControl?.ToString());
-        var credentials = await credentialsResponse.ReadAsync<StorageCredentialsResponse>();
-        Assert.Equal(2, credentials.Version);
-        Assert.Equal("new-key", credentials.AccessKeyId);
-        Assert.Equal("new-secret", credentials.SecretAccessKey);
-
-        // It reports the version it applied on its next heartbeat.
-        await agent.Client.PostJsonAsync("/api/agents/heartbeat",
-            new HeartbeatRequest { Hostname = "vm-01", Version = "0.1.0", OsVersion = "Windows", StorageCredentialsVersion = 2 });
-        var applied = await (await owner.GetAsync($"/api/admin/agents/{agent.AgentId}")).ReadAsync<AgentDto>();
-        Assert.Equal(2, applied.S3CredentialsAppliedVersion);
+    [Fact]
+    public async Task There_is_no_agent_facing_endpoint_to_fetch_storage_credentials_ahead_of_a_job()
+    {
+        var agent = await _server.EnrollAsync();
+        Assert.Equal(HttpStatusCode.NotFound, (await agent.Client.GetAsync("/api/agents/storage-credentials")).StatusCode);
     }
 
     [Fact]

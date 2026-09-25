@@ -12,13 +12,16 @@ using Microsoft.Extensions.Logging;
 
 namespace Dupli.Agent.Cli;
 
-/// <summary>Everything a CLI command or the scheduler needs to run a policy, wired once per invocation.</summary>
+/// <summary>
+/// Everything the server-driven job loop needs, wired once per process. No <c>RepositoryTarget</c> here on
+/// purpose: it is rebuilt for every job from that job's <see cref="Dupli.Agent.Core.Secrets.JobCredentials"/>
+/// (see <see cref="Server.JobExecutor"/>), never fixed at startup.
+/// </summary>
 public sealed record AgentRuntime(
     AgentConfig Config,
     AgentPaths Paths,
     ISecretStore Secrets,
     IBackupEngine Engine,
-    RepositoryTarget Repository,
     PolicyRunner PolicyRunner,
     RestoreTester RestoreTester,
     PostgresRestorer PostgresRestorer,
@@ -34,7 +37,6 @@ public static class AgentRuntimeFactory
         paths.EnsureCreated();
 
         var secrets = secretStore ?? new DpapiSecretStore(paths, loggerFactory.CreateLogger<DpapiSecretStore>());
-        var repository = config.Repository.Resolve(secrets, config.ResticCacheDir ?? paths.Cache);
 
         var processRunner = new ProcessRunner(loggerFactory.CreateLogger<ProcessRunner>());
         var toolManager = new ResticToolManager(
@@ -53,13 +55,13 @@ public static class AgentRuntimeFactory
         IFileSnapshotProvider snapshots = new DirectFileSnapshotProvider();
         var retry = new RetryOptions(config.Retry.MaxRetries, TimeSpan.FromSeconds(config.Retry.BaseDelaySeconds));
         var policyRunner = new PolicyRunner(
-            engine, databases, snapshots, secrets, retry, time ?? TimeProvider.System, loggerFactory.CreateLogger<PolicyRunner>());
+            engine, databases, snapshots, retry, time ?? TimeProvider.System, loggerFactory.CreateLogger<PolicyRunner>());
 
         var restoreTester = new RestoreTester(engine, binLocator, processRunner, loggerFactory.CreateLogger<RestoreTester>());
 
         var postgresRestorer = new PostgresRestorer(binLocator, processRunner, loggerFactory.CreateLogger<PostgresRestorer>());
 
         return new AgentRuntime(
-            config, paths, secrets, engine, repository, policyRunner, restoreTester, postgresRestorer, restic, toolManager, processRunner);
+            config, paths, secrets, engine, policyRunner, restoreTester, postgresRestorer, restic, toolManager, processRunner);
     }
 }

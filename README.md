@@ -6,10 +6,10 @@ Central control plane for backing up Windows VMs (folders and PostgreSQL databas
 
 ## Components
 
-- **Agent** (`src/Dupli.Agent`): Windows service and CLI, published as a single-file exe. It runs backup policies on a schedule and keeps secrets encrypted with DPAPI. The service runs the same exe as **Launcher** (`launch`), which supervises the agent process, switches to a new version staged by the agent and rolls back when the new version crashes or does not report healthy within 5 minutes.
+- **Agent** (`src/Dupli.Agent`): Windows service and CLI, published as a single-file exe, always driven by the server (no standalone mode). It persists only its own identity (`agent-secret`, DPAPI-encrypted); the repository password, S3 keys and PostgreSQL passwords are fetched just in time for each job and released in memory when the job ends. The service runs the same exe as **Launcher** (`launch`), which supervises the agent process, switches to a new version staged by the agent and rolls back when the new version crashes or does not report healthy within 5 minutes.
 - **Agent.Core** (`src/Dupli.Agent.Core`): cross-platform backup engine. It includes the restic wrapper, a tool manager that downloads a pinned restic build and verifies its SHA-256, streaming `pg_dump` via `restic backup --stdin-from-command`, and error classification with retries.
 - **Contracts** (`src/Dupli.Contracts`): DTOs shared between agent and server.
-- **Server** (`src/Dupli.Server`, `.Domain`, `.Infrastructure`): ASP.NET Core control plane on PostgreSQL. Agents enroll with a one-time token and poll for typed jobs (backup, retention, repository check, restore test, restart); the server schedules them (cron + time zone), tracks leases/timeouts, escrows repository passwords and S3 keys, mirrors the pinned restic build and raises alerts by e-mail.
+- **Server** (`src/Dupli.Server`, `.Domain`, `.Infrastructure`): ASP.NET Core control plane on PostgreSQL. Agents enroll with a one-time token and poll for typed jobs (backup, retention, repository check, restore test, restart); the server schedules them (cron + time zone), tracks leases/timeouts, escrows repository passwords, S3 keys and PostgreSQL connection passwords (handed to the agent per job, never persisted by it), mirrors the pinned restic build and raises alerts by e-mail.
 - **Web UI** (`src/Dupli.Web`): Angular app served by the server (BFF). Operators sign in with Microsoft Entra ID; the browser only holds an HttpOnly session cookie, and mutations carry an antiforgery token.
 
 Design choices:
@@ -21,18 +21,15 @@ Design choices:
 
 ```
 dupli-agent launch                                # what the service runs: Launcher supervising `run`
-dupli-agent run                                   # agent process (server polling or local scheduler)
+dupli-agent run                                   # agent process, server-driven (fails if not enrolled)
 dupli-agent version
-dupli-agent backup --policy <id>
-dupli-agent snapshots [--tag k=v]
-dupli-agent restore --snapshot <id> [--target <dir>] [--include <path>]
-dupli-agent forget --policy <id> [--prune]
-dupli-agent check [--subset 5%]
-dupli-agent secret set <name>                     # value read from stdin
+dupli-agent rotate-secret                         # rotates the agent secret used to authenticate with the server
 dupli-agent install --server <url> --token <t> [--require-signature] [--signer-thumbprint <sha1>]
 dupli-agent install                               # enrolled machine: reinstall binaries, Launcher and service
 dupli-agent uninstall
 ```
+
+There is no standalone mode and no local operator commands (`backup`/`snapshots`/`restore`/`forget`/`check`/`secret set`): the agent only ever runs jobs assigned by the server, and PostgreSQL connection passwords are set from the web UI (connection form) instead of `dupli-agent secret set`.
 
 The data root is `%ProgramData%\Dupli`, and you can override it with `DUPLI_HOME`. The configuration lives in `config\agent.json`; agent versions live side by side in `versions\<ver>\` and `versions\current.json` says which one the Launcher starts. The Launcher itself is a copy in `%ProgramFiles%\Dupli\Launcher`.
 

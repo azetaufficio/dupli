@@ -39,6 +39,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
     private const string AdminKey = "it-admin-key";
     private const string S3AccessKey = "dupli-it";
     private const string S3SecretKey = "dupli-it-secret";
+    private const string RepositoryPassword = "dupli-it-repo-password";
     private const string ResticVersion = "0.19.1";
 
     private static readonly Dictionary<string, (string Asset, string Sha256)> ResticAssets = new()
@@ -47,6 +48,16 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         ["linux-x64"] = ("restic_0.19.1_linux_amd64.bz2", "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c"),
         ["win-x64"] = ("restic_0.19.1_windows_amd64.zip", "da948ad707ed690426473aaba2046cd61f8f90f6f0e7dab6be0d5796531de67d"),
     };
+
+    /// <summary>Same discovery as <c>PolicyRunnerEndToEndTests</c>: skip the PostgreSQL test where pg_dump is absent.</summary>
+    private static readonly string? PgBin = new[]
+        {
+            Environment.GetEnvironmentVariable("DUPLI_TEST_PG_BIN"),
+            "/opt/homebrew/opt/libpq/bin",
+            "/usr/lib/postgresql/18/bin",
+            "/usr/bin",
+        }
+        .FirstOrDefault(d => d is not null && File.Exists(Path.Combine(d, OperatingSystem.IsWindows() ? "pg_dump.exe" : "pg_dump")));
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "dupli-it", Guid.NewGuid().ToString("N"));
     private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:18-alpine").Build();
@@ -93,7 +104,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var agent = await Read<AgentDto>(await admin.PostAsJsonAsync("/api/admin/agents", new CreateAgentRequest
         {
             Name = "vm-it", StorageTargetId = storage.Id, StoragePrefix = "agents/vm-it",
-            S3AccessKeyId = S3AccessKey, S3SecretAccessKey = S3SecretKey,
+            S3AccessKeyId = S3AccessKey, S3SecretAccessKey = S3SecretKey, RepositoryPassword = RepositoryPassword,
         }, DupliJson.Options));
         var token = await Read<EnrollmentTokenDto>(await admin.PostAsync($"/api/admin/agents/{agent.Id}/enrollment-tokens", null));
 
@@ -113,18 +124,19 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
             Sources = [new PolicyDirectorySourceDto { SourceId = "data", Paths = [data] }],
         }, DupliJson.Options));
 
-        // Agent: enrollment stores every secret in the secret store, none in agent.json.
+        // Agent: enrollment stores only the agent secret, nowhere else (not even in agent.json).
         var paths = new AgentPaths(Path.Combine(_root, "agent"));
         var secrets = new MemorySecretStore();
         var enrolled = await AgentEnrollment.EnrollAsync("http://localhost", token.Token, paths, secrets,
             _server.CreateClient(), NullLogger.Instance, CancellationToken.None);
         Assert.Equal(agent.Id.ToString(), enrolled.Server!.AgentId);
         Assert.DoesNotContain(S3SecretKey, await File.ReadAllTextAsync(paths.ConfigFile));
-        Assert.Equal(S3SecretKey, secrets.Get(SecretNames.S3SecretKey));
+        Assert.Equal([SecretNames.AgentSecret], secrets.Names());
 
         // The mirror serves the Windows build; the test host needs its own platform's restic.
         var config = enrolled with { ResticManifest = LocalResticManifest() };
         var (loop, runtime, ledger) = CreateAgent(paths, config, secrets);
+        var repository = RepositoryFor(config, RepositoryPassword);
 
         // Run now → assigned → backed up → reported.
         var job = await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
@@ -135,7 +147,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var run = Assert.Single((await Read<PagedDto<RunDto>>(await admin.GetAsync($"/api/admin/runs?policyId={policy.Id}"))).Items);
         var snapshotId = Assert.Single(run.Items).SnapshotId;
 
-        var snapshots = await runtime.Engine.ListSnapshotsAsync(runtime.Repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None);
+        var snapshots = await runtime.Engine.ListSnapshotsAsync(repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None);
         Assert.Contains(snapshots, s => s.Id == snapshotId);
         Assert.Equal(LedgerState.Reported, ledger.GetState(job.Id.ToString()));
 
@@ -183,7 +195,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var interrupted = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{crashed.Id}"));
         Assert.Equal(JobState.Failed, interrupted.State);
         Assert.StartsWith("Interrupted", interrupted.Error);
-        Assert.Single(await runtime.Engine.ListSnapshotsAsync(runtime.Repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None));
+        Assert.Single(await runtime.Engine.ListSnapshotsAsync(repository, [BackupTags.Policy(policy.Id.ToString())], CancellationToken.None));
     }
 
     [SkippableFact]
@@ -305,15 +317,15 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Full "desired state via heartbeat" round trip for S3 credentials: a wrong key is rejected (422, a real
-    /// read-only restic listing against RustFS), the right key is accepted and versioned, the agent picks it
-    /// up on its next heartbeat (fetch + local state file), and the backup right after succeeds.
+    /// A wrong key is rejected (422, a real read-only restic listing against RustFS); the right key is accepted
+    /// and versioned; the very next job already gets it from <c>JobCredentialsService</c> (no heartbeat-driven
+    /// fetch, no local secret store write) and succeeds.
     /// Note: RustFS in this harness has a single access key, so "the new key" is the same value as the old one;
     /// what this proves is the protocol end to end and that a job started after the rotation re-reads the
     /// current secrets (JobExecutor no longer captures a fixed RepositoryTarget at process startup).
     /// </summary>
     [Fact]
-    public async Task Owner_rotates_the_agents_S3_key_and_the_next_backup_succeeds()
+    public async Task Owner_rotates_the_agents_S3_key_and_the_next_backup_succeeds_with_no_local_write()
     {
         var admin = _server.CreateClient();
         admin.DefaultRequestHeaders.Add(AuthConstants.AdminKeyHeader, AdminKey);
@@ -343,18 +355,63 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         Assert.Equal(System.Net.HttpStatusCode.NoContent, accepted.StatusCode);
         var afterUpdate = await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"));
         Assert.Equal(2, afterUpdate.S3CredentialsVersion);
-        Assert.Equal(1, afterUpdate.S3CredentialsAppliedVersion); // not yet reported by a heartbeat
 
-        await loop.RunOnceAsync(CancellationToken.None); // heartbeat: fetches version 2 and applies it locally
-        await loop.RunOnceAsync(CancellationToken.None); // next heartbeat: reports version 2 as applied
-
-        var applied = await Read<AgentDto>(await admin.GetAsync($"/api/admin/agents/{agentId}"));
-        Assert.Equal(2, applied.S3CredentialsAppliedVersion);
-
+        // No heartbeat-driven fetch any more: the very next job's credentials already carry the new key.
         var job = await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
         await loop.RunOnceAsync(CancellationToken.None);
         var finished = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{job.Id}"));
         Assert.Equal(JobState.Succeeded, finished.State);
+
+        // Never written locally, whichever key was actually used.
+        Assert.Equal([SecretNames.AgentSecret], secrets.Names());
+    }
+
+    /// <summary>
+    /// PostgreSQL password set through the admin API (<c>PgConnectionRequest.Password</c>, escrowed server-side)
+    /// instead of <c>dupli-agent secret set</c>: the agent fetches it with the job's credentials and never
+    /// writes it to its local secret store.
+    /// </summary>
+    [SkippableFact]
+    public async Task Backup_of_a_postgres_source_uses_the_password_set_through_the_admin_api()
+    {
+        Skip.If(PgBin is null, "pg_dump not available");
+
+        var admin = _server.CreateClient();
+        admin.DefaultRequestHeaders.Add(AuthConstants.AdminKeyHeader, AdminKey);
+        var (agentId, paths, secrets, config) = await EnrollAgentAsync(admin, "vm-pg");
+
+        await using var pg = new PostgreSqlBuilder("postgres:18-alpine").WithPassword("s3kr3t-pg").Build();
+        await pg.StartAsync();
+        var cs = new Npgsql.NpgsqlConnectionStringBuilder(pg.GetConnectionString());
+
+        var connection = await Read<PgConnectionDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/connections", new PgConnectionRequest
+        {
+            Name = "pg-it",
+            Host = cs.Host!,
+            Port = cs.Port,
+            Username = cs.Username!,
+            PasswordSecret = "pg-it",
+            BinDirectory = PgBin,
+            Password = "s3kr3t-pg",
+        }, DupliJson.Options));
+        Assert.True(connection.PasswordSet);
+
+        var policy = await Read<PolicyDto>(await admin.PostAsJsonAsync($"/api/admin/agents/{agentId}/policies", new PolicyRequest
+        {
+            Name = "pg-nightly", Cron = "0 2 * * *",
+            Sources = [new PolicyPostgresSourceDto { SourceId = "pg", ConnectionId = connection.Id }],
+        }, DupliJson.Options));
+
+        var (loop, _, _) = CreateAgent(paths, config, secrets);
+        var job = await Read<JobDto>(await admin.PostAsync($"/api/admin/policies/{policy.Id}/run", null));
+        await loop.RunOnceAsync(CancellationToken.None);
+
+        var finished = await Read<JobDto>(await admin.GetAsync($"/api/admin/jobs/{job.Id}"));
+        Assert.Equal(JobState.Succeeded, finished.State);
+        Assert.Contains(finished.Items, i => i.SourceId == "pg");
+
+        // The password never touches the agent's local secret store: fetched per job, released at the end.
+        Assert.Equal([SecretNames.AgentSecret], secrets.Names());
     }
 
     private async Task<(Guid AgentId, AgentPaths Paths, MemorySecretStore Secrets, AgentConfig Config)> EnrollAgentAsync(HttpClient admin, string name)
@@ -364,7 +421,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var agent = await Read<AgentDto>(await admin.PostAsJsonAsync("/api/admin/agents", new CreateAgentRequest
         {
             Name = name, StorageTargetId = storage.Id, StoragePrefix = "agents/" + name,
-            S3AccessKeyId = S3AccessKey, S3SecretAccessKey = S3SecretKey,
+            S3AccessKeyId = S3AccessKey, S3SecretAccessKey = S3SecretKey, RepositoryPassword = RepositoryPassword,
         }, DupliJson.Options));
         var token = await Read<EnrollmentTokenDto>(await admin.PostAsync($"/api/admin/agents/{agent.Id}/enrollment-tokens", null));
 
@@ -390,7 +447,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         var ledger = new JobLedger(paths.LedgerFile);
         var executor = new JobExecutor(runtime, ledger, TimeProvider.System, _loggers.CreateLogger<JobExecutor>());
         var updates = withUpdates ? CreateUpdates(paths, runtime) : null;
-        var loop = new ServerAgentLoop(CreateClient(config, secrets), ledger, executor, config, paths, secrets, TimeProvider.System,
+        var loop = new ServerAgentLoop(CreateClient(config, secrets), ledger, executor, config, paths, TimeProvider.System,
             _restarter, _loggers.CreateLogger<ServerAgentLoop>(), updates);
         return (loop, runtime, ledger);
     }
@@ -404,11 +461,21 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         {
             LauncherManagedOverride = true,
         };
-        var resticUpdater = new ResticUpdater(runtime.Restic, runtime.ResticTools, runtime.Repository, paths, runtime.Processes,
-            TimeProvider.System, _loggers);
+        var resticUpdater = new ResticUpdater(runtime.Restic, runtime.ResticTools, paths, TimeProvider.System, _loggers);
         return new AgentUpdates(agentUpdater, resticUpdater, runtime.Restic, files,
             new LauncherHealthReporter(files, TimeProvider.System, _loggers.CreateLogger<LauncherHealthReporter>()));
     }
+
+    /// <summary>
+    /// Builds the <see cref="RepositoryTarget"/> a job would get from the server for verification purposes,
+    /// exactly the way <see cref="Dupli.Agent.Server.JobExecutor"/> does per job: <c>RepositoryConfig.Resolve</c>
+    /// fed by a <see cref="JobCredentials"/> built from the known test secrets (never persisted by the agent).
+    /// </summary>
+    private static RepositoryTarget RepositoryFor(AgentConfig config, string repositoryPassword) =>
+        config.Repository.Resolve(new JobCredentials(new JobCredentialsResponse
+        {
+            Repository = new JobRepositoryCredentialsDto { Password = repositoryPassword, AccessKeyId = S3AccessKey, SecretAccessKey = S3SecretKey },
+        }), null);
 
     private ServerClient CreateClient(AgentConfig config, ISecretStore secrets) =>
         new(_server.CreateClient(), config.Server!, secrets, TimeProvider.System, _loggers.CreateLogger<ServerClient>());
@@ -463,5 +530,7 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
         public string? Get(string name) => _values.TryGetValue(name, out var v) ? v : null;
 
         public void Set(string name, string value) => _values[name] = value;
+
+        public IReadOnlyList<string> Names() => _values.Keys.Order().ToList();
     }
 }

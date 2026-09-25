@@ -12,8 +12,9 @@ using Microsoft.Win32;
 namespace Dupli.Agent.Server;
 
 /// <summary>
-/// Exchanges the single-use enrollment token for AgentId + secrets, stores every secret in the local
-/// secret store (DPAPI) and writes <c>agent.json</c> in server mode. Secrets never touch the JSON file.
+/// Exchanges the single-use enrollment token for AgentId + agent secret and writes <c>agent.json</c>.
+/// The only secret persisted locally is the agent secret (DPAPI): repository and database credentials are
+/// fetched per job from the server and never stored.
 /// </summary>
 public static class AgentEnrollment
 {
@@ -56,11 +57,6 @@ public static class AgentEnrollment
             ?? throw new InvalidOperationException("Empty enrollment response");
 
         secrets.Set(SecretNames.AgentSecret, registration.AgentSecret);
-        secrets.Set(SecretNames.RepositoryPassword, registration.RepositoryPassword);
-        secrets.Set(SecretNames.S3AccessKey, registration.S3AccessKeyId);
-        secrets.Set(SecretNames.S3SecretKey, registration.S3SecretAccessKey);
-        // Enrollment already delivers the current S3 key: nothing to apply after the fact.
-        await StorageCredentialsStateFile.WriteAsync(paths, registration.S3CredentialsVersion, cancellationToken);
 
         // Keep local settings (retry, cache dir) of an existing install; server mode replaces the rest.
         var previous = File.Exists(paths.ConfigFile) ? AgentConfigLoader.Load(paths.ConfigFile) : null;
@@ -74,9 +70,6 @@ public static class AgentEnrollment
                 Bucket = registration.Repository.Bucket,
                 Prefix = registration.Repository.Prefix,
                 Region = registration.Repository.Region,
-                PasswordSecret = SecretNames.RepositoryPassword,
-                AccessKeySecret = SecretNames.S3AccessKey,
-                SecretKeySecret = SecretNames.S3SecretKey,
             },
             ResticManifest = registration.ResticManifest,
             Retry = previous?.Retry ?? new RetryConfig(),

@@ -47,19 +47,37 @@ public sealed class DpapiSecretStoreTests : IDisposable
             File.GetUnixFileMode(Path.GetDirectoryName(file)!));
     }
 
+    /// <summary>The env var override is honored only for the agent secret: every business credential now
+    /// comes from a per-job fetch, never from an environment variable.</summary>
     [SkippableFact]
-    public void NonWindows_get_falls_back_to_environment_variable()
+    public void NonWindows_get_falls_back_to_environment_variable_for_the_agent_secret_only()
     {
         Skip.If(OperatingSystem.IsWindows(), "exercises the non-Windows fallback only");
 
-        Environment.SetEnvironmentVariable("DUPLI_SECRET_DEV_ONLY", "from-env");
+        Environment.SetEnvironmentVariable("DUPLI_SECRET_AGENT-SECRET", "from-env");
         try
         {
-            Assert.Equal("from-env", Store().Get("dev_only"));
+            Assert.Equal("from-env", Store().Get(SecretNames.AgentSecret));
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DUPLI_SECRET_DEV_ONLY", null);
+            Environment.SetEnvironmentVariable("DUPLI_SECRET_AGENT-SECRET", null);
+        }
+    }
+
+    [SkippableFact]
+    public void NonWindows_get_ignores_the_environment_variable_for_any_other_secret()
+    {
+        Skip.If(OperatingSystem.IsWindows(), "exercises the non-Windows fallback only");
+
+        Environment.SetEnvironmentVariable("DUPLI_SECRET_OTHER", "from-env");
+        try
+        {
+            Assert.Null(Store().Get("other"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DUPLI_SECRET_OTHER", null);
         }
     }
 
@@ -67,6 +85,27 @@ public sealed class DpapiSecretStoreTests : IDisposable
     public void Rejects_invalid_secret_names()
     {
         Assert.Throws<ArgumentException>(() => Store().Get("bad name!"));
+    }
+
+    [Fact]
+    public void Names_lists_every_stored_secret_and_delete_removes_one()
+    {
+        var store = Store();
+        store.Set("agent-secret", "a");
+        store.Set("repo-password", "b");
+
+        Assert.Equal(["agent-secret", "repo-password"], store.Names().Order());
+
+        store.Delete("repo-password");
+
+        Assert.Equal(["agent-secret"], store.Names());
+        Assert.Null(store.Get("repo-password"));
+    }
+
+    [Fact]
+    public void Names_is_empty_when_nothing_was_ever_stored()
+    {
+        Assert.Empty(Store().Names());
     }
 
     public void Dispose() => _tmp.Dispose();

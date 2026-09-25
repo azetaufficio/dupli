@@ -110,7 +110,8 @@ public sealed class StorageTarget
 
 /// <summary>
 /// A reusable PostgreSQL connection on an agent, referenced by policy sources via <c>ConnectionId</c>.
-/// The password itself never appears here: only the name of the secret holding it in the agent's local store.
+/// The password itself never appears here: it is escrowed in <see cref="AgentSecret"/> under the name
+/// <see cref="PasswordSecret"/>, and delivered to the agent per job (see <c>JobCredentialsService</c>).
 /// </summary>
 public sealed class PgConnection
 {
@@ -123,5 +124,20 @@ public sealed class PgConnection
     public required string PasswordSecret { get; set; }
     public string? BinDirectory { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Escrowed secret named by a policy source (currently PostgreSQL connection passwords, keyed by
+/// <see cref="PgConnection.PasswordSecret"/>), fetched by the agent per job via the job credentials endpoint.
+/// The agent never persists it: only held in memory for the duration of that job.
+/// </summary>
+public sealed class AgentSecret
+{
+    public Guid AgentId { get; set; }
+    public required string Name { get; set; }
+
+    /// <summary>Data Protection payload (escrow), same scheme as <see cref="Agent.RepositoryPasswordProtected"/>.</summary>
+    public required string ValueProtected { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

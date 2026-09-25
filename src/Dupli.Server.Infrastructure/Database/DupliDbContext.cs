@@ -18,6 +18,7 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
     public DbSet<EnrollmentToken> EnrollmentTokens => Set<EnrollmentToken>();
     public DbSet<StorageTarget> StorageTargets => Set<StorageTarget>();
     public DbSet<PgConnection> PgConnections => Set<PgConnection>();
+    public DbSet<AgentSecret> AgentSecrets => Set<AgentSecret>();
     public DbSet<BackupPolicy> Policies => Set<BackupPolicy>();
     public DbSet<BackupSource> Sources => Set<BackupSource>();
     public DbSet<Job> Jobs => Set<Job>();
@@ -53,6 +54,13 @@ public sealed class DupliDbContext(DbContextOptions<DupliDbContext> options) : D
         b.Entity<PgConnection>(e =>
         {
             e.ToTable("pg_connection");
+            e.HasOne<Agent>().WithMany().HasForeignKey(x => x.AgentId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AgentSecret>(e =>
+        {
+            e.ToTable("agent_secret");
+            e.HasKey(x => new { x.AgentId, x.Name });
             e.HasOne<Agent>().WithMany().HasForeignKey(x => x.AgentId).OnDelete(DeleteBehavior.Cascade);
         });
 

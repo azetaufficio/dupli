@@ -22,9 +22,8 @@ public sealed class EnrollmentTests(PostgresFixture postgres) : IAsyncLifetime
         var agent = await _server.EnrollAsync("vm-01");
         var r = agent.Registration;
 
-        Assert.Equal("repo-password-vm-01", r.RepositoryPassword);
-        Assert.Equal("AK-vm-01", r.S3AccessKeyId);
-        Assert.Equal("SK-vm-01", r.S3SecretAccessKey);
+        // No business secret in the response: only the agent's identity (AgentId/AgentSecret) and non-secret
+        // repository data. Repository password and S3 keys stay server-side; the agent fetches them per job.
         Assert.Equal(new RepositoryDto { Endpoint = "http://localhost:9000", Bucket = "backups", Prefix = "agents/vm-01", Region = "us-east-1" }, r.Repository);
         Assert.Equal("0.19.1", r.ResticManifest.Version);
         Assert.Equal("https://dupli.test/api/tools/restic/0.19.1/windows_amd64", r.ResticManifest.DownloadUrl);
@@ -32,6 +31,22 @@ public sealed class EnrollmentTests(PostgresFixture postgres) : IAsyncLifetime
         var details = await (await _server.Admin().GetAsync($"/api/admin/agents/{agent.AgentId}")).ReadAsync<AgentDto>();
         Assert.Equal(Domain.Agents.AgentStatus.Active, details.Status);
         Assert.Equal("vm-01.local", details.Hostname);
+    }
+
+    [Fact]
+    public async Task Registration_response_body_never_contains_the_repository_password_or_the_S3_secret_key()
+    {
+        var agent = await _server.CreateAgentAsync("vm-secretcheck"); // repo-password-vm-secretcheck / SK-vm-secretcheck
+        var token = await (await _server.Admin().PostAsync($"/api/admin/agents/{agent.Id}/enrollment-tokens", null)).ReadAsync<EnrollmentTokenDto>();
+
+        var response = await _server.CreateClient().PostJsonAsync("/api/agents/register", new RegisterAgentRequest
+        {
+            EnrollmentToken = token.Token, MachineId = "m", Hostname = "h", OsVersion = "os", AgentVersion = "0.1.0",
+        });
+
+        var raw = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("repo-password-vm-secretcheck", raw);
+        Assert.DoesNotContain("SK-vm-secretcheck", raw);
     }
 
     [Theory]

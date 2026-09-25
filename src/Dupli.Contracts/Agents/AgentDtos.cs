@@ -19,20 +19,15 @@ public sealed record RegisterAgentRequest
 }
 
 /// <summary>
-/// Everything an agent needs to operate. Carries secrets: the agent stores them with DPAPI
-/// immediately and never writes them to plain files or logs.
+/// Everything an agent needs to operate, minus business secrets: the agent persists only
+/// <see cref="AgentSecret"/> (its identity towards the server) and fetches repository/database
+/// credentials just in time, per job, from <c>POST api/agents/jobs/{jobId}/credentials</c>.
 /// </summary>
 public sealed class RegisterAgentResponse
 {
     public required string AgentId { get; init; }
     public required string AgentSecret { get; init; }
     public required RepositoryDto Repository { get; init; }
-    public required string RepositoryPassword { get; init; }
-    public required string S3AccessKeyId { get; init; }
-    public required string S3SecretAccessKey { get; init; }
-
-    /// <summary>Version of the S3 credentials delivered above; the agent records it as already applied.</summary>
-    public int S3CredentialsVersion { get; init; } = 1;
     public required ToolManifestDto ResticManifest { get; init; }
     public int PollIntervalSeconds { get; init; } = 30;
 
@@ -69,16 +64,6 @@ public sealed class RotateSecretResponse
     public override string ToString() => "RotateSecretResponse";
 }
 
-/// <summary>Answer to <c>GET /api/agents/storage-credentials</c>: the S3 key currently desired for this agent.</summary>
-public sealed class StorageCredentialsResponse
-{
-    public required int Version { get; init; }
-    public required string AccessKeyId { get; init; }
-    public required string SecretAccessKey { get; init; }
-
-    public override string ToString() => $"StorageCredentialsResponse(v{Version})";
-}
-
 public sealed record HeartbeatRequest
 {
     public required string Hostname { get; init; }
@@ -101,8 +86,10 @@ public sealed record HeartbeatRequest
     /// <summary>Why the desired restic version could not be activated (null when it is active or not attempted).</summary>
     public string? ResticUpdateError { get; init; }
 
-    /// <summary>S3 credentials version the agent currently has applied. Null: an agent older than this feature,
-    /// which leaves <c>Agent.S3CredentialsAppliedVersion</c> untouched.</summary>
+    /// <summary>Legacy field: an agent older than the just-in-time credentials feature reports here the S3
+    /// version it last applied out of band. Current agents never set it (repository/S3 credentials are fetched
+    /// fresh with every job's <c>JobCredentialsResponse</c>), so <c>Agent.S3CredentialsAppliedVersion</c> is
+    /// simply left untouched by their heartbeats.</summary>
     public int? StorageCredentialsVersion { get; init; }
 }
 
@@ -117,8 +104,8 @@ public sealed record HeartbeatResponse
     /// <summary>restic release the server wants this agent to use.</summary>
     public ToolManifestDto? DesiredRestic { get; init; }
 
-    /// <summary>S3 credentials version the server wants this agent to use. Greater than what the agent has
-    /// applied: it must call <c>GET /api/agents/storage-credentials</c> and update its local secrets.</summary>
+    /// <summary>S3 credentials version currently desired for this agent (admin-visible only: a current agent
+    /// does not act on this, it always gets the live key with the next job's <c>JobCredentialsResponse</c>).</summary>
     public int StorageCredentialsVersion { get; init; } = 1;
 }
 

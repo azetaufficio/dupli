@@ -402,14 +402,9 @@ Procedura:
    .\dupli-agent.exe install --server https://<FQDN> --token <TOKEN>
    sc.exe start DupliAgent
    ```
-   L'install fa l'enrollment e salva segreti, password del repository e chiave S3 con DPAPI. Poi copia l'exe in `C:\ProgramData\Dupli\versions\<ver>\` e come Launcher in `C:\Program Files\Dupli\Launcher\`, restringe l'ACL di `C:\ProgramData\Dupli` (SYSTEM e Administrators, Users in sola lettura) e registra il servizio `DupliAgent` (LocalSystem, avvio automatico, riavvio automatico in caso di crash) che esegue `dupli-agent.exe launch`. **Non avvia il servizio**: per quello serve `sc.exe start`.
+   L'install fa l'enrollment e salva con DPAPI solo l'identità dell'agent (`agent-secret`): password del repository, chiave S3 e password PostgreSQL non vengono mai scritte sulla VM, l'agent le richiede al server per ogni singolo job e le tiene solo in memoria per la durata di quel job. Poi copia l'exe in `C:\ProgramData\Dupli\versions\<ver>\` e come Launcher in `C:\Program Files\Dupli\Launcher\`, restringe l'ACL di `C:\ProgramData\Dupli` (SYSTEM e Administrators, Users in sola lettura) e registra il servizio `DupliAgent` (LocalSystem, avvio automatico, riavvio automatico in caso di crash) che esegue `dupli-agent.exe launch`. **Non avvia il servizio**: per quello serve `sc.exe start`.
    Se Defender o SmartScreen bloccano l'exe (non firmato), aggiungi un'eccezione per quel file. Con un certificato di firma: aggiungi `--require-signature --signer-thumbprint <thumbprint>` e l'agent accetterà solo aggiornamenti firmati da quel certificato.
-3. Se farai backup PostgreSQL, salva la password del DB con lo stesso nome che userai nella policy (campo *Password secret*, es. `pg-main`):
-   ```powershell
-   $exe = "C:\Program Files\Dupli\Launcher\dupli-agent.exe"
-   $p = Read-Host "Password PostgreSQL" -AsSecureString
-   [Net.NetworkCredential]::new('', $p).Password | & $exe secret set pg-main
-   ```
+3. Se farai backup PostgreSQL, imposta la password del DB dalla UI invece che sulla VM: agente → tab *Connections* → crea (o modifica) la connessione con lo stesso *Password secret* che userai nella policy (es. `pg-main`) e compila il campo *Password* (write-only: il server la cifra e la consegna all'agent solo quando esegue un job).
 4. Entro circa 30 secondi, nella UI l'agent passa a **Active / online** con hostname, OS, versione e spazio disco. Nella tab *Logs* compaiono i log caricati dall'agent.
    Log locali: `C:\ProgramData\Dupli\logs\` (`agent-*.json` e `launcher-*.json`). Stato del servizio: `sc.exe query DupliAgent`.
 
@@ -425,15 +420,10 @@ Procedura:
 2. **Run now** sulla policy. Nella tab *Jobs* lo stato passa Pending → Running → Succeeded; nella tab *Backup history* compaiono snapshot e byte.
 3. **Run restore test**: nella tab *Restore tests* ogni file del campione e ogni DB devono risultare Succeeded.
 4. **Check repository**: Succeeded.
-5. Restore dalla UI: tab *Snapshots* → *Browse* su uno snapshot di cartelle, seleziona file o cartelle (oppure niente = tutto) → *Restore*. Il job va sull'agent e scrive in `C:\DupliRestore\<job-id>` (o in una cartella a scelta, nuova o vuota, fuori dai percorsi sotto backup). Per uno snapshot PostgreSQL c'è anche *Also load the dump into a new database*: crea un DB **nuovo** (il nome va scritto due volte) e ci fa `pg_restore`; non tocca mai un DB esistente.
-6. Restore manuale di prova sulla VM (non sovrascrive mai le sorgenti):
-   ```powershell
-   & $exe snapshots
-   & $exe restore --snapshot <id>          # finisce in C:\DupliRestore\<id>
-   ```
-7. **Restart agent** dalla UI: il job va a Succeeded, il servizio si riavvia da solo entro pochi secondi e l'agent torna online.
-8. Test di errore (utili per vedere gli alert via email):
-   - password PG sbagliata (`secret set pg-main` con un valore errato, poi Run now): job Failed e alert *BackupFailed*;
+5. Restore dalla UI: tab *Snapshots* → *Browse* su uno snapshot di cartelle, seleziona file o cartelle (oppure niente = tutto) → *Restore*. Il job va sull'agent (non c'è un comando CLI equivalente: ogni restore è sempre guidato dal server) e scrive in `C:\DupliRestore\<job-id>` (o in una cartella a scelta, nuova o vuota, fuori dai percorsi sotto backup). Per uno snapshot PostgreSQL c'è anche *Also load the dump into a new database*: crea un DB **nuovo** (il nome va scritto due volte) e ci fa `pg_restore`; non tocca mai un DB esistente.
+6. **Restart agent** dalla UI: il job va a Succeeded, il servizio si riavvia da solo entro pochi secondi e l'agent torna online.
+7. Test di errore (utili per vedere gli alert via email):
+   - password PG sbagliata (modifica la connessione dalla UI con una password errata, poi Run now): job Failed e alert *BackupFailed*;
    - cartella inesistente nella policy: item Failed, gli altri item vanno avanti;
    - servizio fermo per più di 5 minuti (`sc.exe stop DupliAgent`): alert *AgentOffline* e, al riavvio, email "RESOLVED";
    - stop del servizio durante un backup: al riavvio il job viene riportato come *Interrupted*.
@@ -449,7 +439,8 @@ Procedura:
   3. Gli agent del canale (o con la versione fissata nella tab *Updates* dell'agent) scaricano la release quando sono inattivi, verificano lo sha256 e passano la mano al Launcher. Se la nuova versione crasha o non risponde entro 5 minuti, il Launcher torna alla precedente, l'agent lo segnala e parte l'alert *AgentUpdateFailed*. Quella versione non viene più ritentata su quella VM.
   4. restic si aggiorna allo stesso modo: rendi corrente una nuova release restic; l'agent la installa e la prova sul repository prima di usarla.
   5. Il Launcher stesso non si aggiorna da solo: per aggiornarlo, lancia sulla VM `dupli-agent.exe install` (senza token) con l'exe nuovo. Ferma e riavvia il servizio da solo.
+  6. Aggiornando una VM da una versione precedente alle credenziali just-in-time: al primo avvio il nuovo agent cancella ogni secret locale diverso da `agent-secret` (password del repository, chiavi S3, password PostgreSQL salvate con il vecchio `secret set`). Le password PostgreSQL vanno reinserite dalla UI (agente → tab *Connections* → campo *Password*) prima del prossimo backup; il repository e le chiavi S3 non richiedono alcuna azione, l'agent li richiede al server per ogni job.
 - **Rate limiting:** gli endpoint anonimi esposti su internet (`/api/agents/register`, `/api/agents/token`, `/bff/login`) accettano 30 richieste al minuto per IP client (preso da `X-Forwarded-For` dell'ingress), poi rispondono `429` con `Retry-After`. Gli agent lo trattano come errore temporaneo e ritentano. Se hai molte VM dietro lo stesso IP pubblico, alza `Dupli__RateLimiting__PermitLimit`.
 - **Rinnovo segreti:** client secret Entra (scadenza impostata al punto 6), secret del mailer, password PG. Si aggiornano con `az containerapp secret set` e poi `az containerapp revision restart`.
 - **Backup da fare fuori da Dupli:** DB PostgreSQL (backup automatici Azure) **e** key ring (i secret `dupli-dataprotection-*` del Key Vault: soft delete + purge protection; per una copia fuori da Azure `az keyvault secret backup`). Il DB senza key ring non basta per recuperare le password dei repository. Tieni comunque nel vault anche le password dei repository restic delle VM critiche.
-- **Rimozione agent da una VM:** `& $exe uninstall` (ferma ed elimina il servizio), poi *Disable* nella UI.
+- **Rimozione agent da una VM:** `& "C:\Program Files\Dupli\Launcher\dupli-agent.exe" uninstall` (ferma ed elimina il servizio), poi *Disable* nella UI.

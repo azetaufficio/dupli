@@ -57,7 +57,8 @@ public sealed partial class PostgresRestorer(
         }
 
         logger.LogWarning("pg_restore into {Database} exited with {Code}", newDatabase, result.ExitCode);
-        return [$"pg_restore exited with {result.ExitCode}; some objects may be missing", .. result.StderrTail];
+        return [$"pg_restore exited with {result.ExitCode}; some objects may be missing",
+            .. SecretRedaction.Redact(result.StderrTail, [password])];
     }
 
     private static async Task CreateDatabaseAsync(PostgresSourceDto source, string password, string name, CancellationToken ct)
@@ -76,7 +77,7 @@ public sealed partial class PostgresRestorer(
         }
         catch (NpgsqlException ex)
         {
-            throw PostgresConnection.Map(source, ex);
+            throw PostgresConnection.Map(source, ex, password);
         }
     }
 

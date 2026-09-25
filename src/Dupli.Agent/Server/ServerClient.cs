@@ -89,8 +89,9 @@ public sealed class ServerClient
     public Task<RotateSecretResponse> RotateSecretAsync(CancellationToken ct) =>
         SendAsync<RotateSecretResponse>(HttpMethod.Post, "api/agents/secret/rotate", null, ct);
 
-    public Task<StorageCredentialsResponse> GetStorageCredentialsAsync(CancellationToken ct) =>
-        SendAsync<StorageCredentialsResponse>(HttpMethod.Get, "api/agents/storage-credentials", null, ct);
+    /// <summary>Just-in-time credentials for one Running job. Never cached client-side: fetched anew per job.</summary>
+    public Task<JobCredentialsResponse> GetJobCredentialsAsync(string jobId, CancellationToken ct) =>
+        SendAsync<JobCredentialsResponse>(HttpMethod.Post, $"api/agents/jobs/{jobId}/credentials", null, ct);
 
     private Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
         _retry.ExecuteAsync(async token =>

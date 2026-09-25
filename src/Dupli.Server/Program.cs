@@ -72,6 +72,7 @@ builder.Services.AddSingleton<AgentTokenIssuer>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddScoped<EnrollmentService>();
 builder.Services.AddScoped<JobService>();
+builder.Services.AddScoped<JobCredentialsService>();
 builder.Services.AddScoped<NotificationDispatcher>();
 builder.Services.AddScoped<ReleaseMirror>();
 builder.Services.AddScoped<DesiredVersionResolver>();

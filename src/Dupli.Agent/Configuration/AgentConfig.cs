@@ -1,13 +1,13 @@
 using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Secrets;
-using Dupli.Contracts.Policies;
 using Dupli.Contracts.Tools;
 
 namespace Dupli.Agent.Configuration;
 
 /// <summary>
-/// Local <c>config\agent.json</c>. Never carries secret values: only the names of secrets
-/// resolved through <see cref="ISecretStore"/> at run time.
+/// Local <c>config\agent.json</c>. Never carries secret values: business credentials (repository,
+/// PostgreSQL) are fetched per job from the server (<see cref="Dupli.Agent.Core.Secrets.JobCredentials"/>),
+/// never persisted here or anywhere else on disk.
 /// </summary>
 public sealed record AgentConfig
 {
@@ -15,13 +15,12 @@ public sealed record AgentConfig
     public string Host { get; init; } = Environment.MachineName;
     public required RepositoryConfig Repository { get; init; }
     public required ToolManifestDto ResticManifest { get; init; }
-    public IReadOnlyList<ScheduledPolicy> Policies { get; init; } = [];
     public RetryConfig Retry { get; init; } = new();
 
     /// <summary>Overrides RESTIC_CACHE_DIR. Defaults to <see cref="AgentPaths.Cache"/>.</summary>
     public string? ResticCacheDir { get; init; }
 
-    /// <summary>Set after enrollment: the agent is driven by the server and local <see cref="Policies"/> are not scheduled.</summary>
+    /// <summary>Set at enrollment: the agent only ever runs driven by the server, never standalone.</summary>
     public ServerConfig? Server { get; init; }
 
     /// <summary>Local trust settings for agent updates. Never changed by the server.</summary>
@@ -47,18 +46,17 @@ public sealed record ServerConfig
     public string AgentSecretName { get; init; } = SecretNames.AgentSecret;
 }
 
-/// <summary>Secret names written by enrollment.</summary>
+/// <summary>Secret names written by enrollment. The only one still persisted locally: everything else is
+/// fetched just in time per job (<see cref="Dupli.Agent.Core.Secrets.JobCredentials"/>) and never stored.</summary>
 public static class SecretNames
 {
     public const string AgentSecret = "agent-secret";
-    public const string RepositoryPassword = "repo-password";
-    public const string S3AccessKey = "s3-access-key";
-    public const string S3SecretKey = "s3-secret-key";
 }
 
 /// <summary>
 /// Either <see cref="Raw"/> (a full restic repository string, e.g. <c>s3:https://host/bucket/prefix</c>)
-/// or the individual S3 fields, from which the repository string is composed.
+/// or the individual S3 fields, from which the repository string is composed. Never carries credentials:
+/// those come from a <see cref="Dupli.Agent.Core.Secrets.JobCredentials"/> at <see cref="RepositoryConfigExtensions.Resolve"/> time.
 /// </summary>
 public sealed record RepositoryConfig
 {
@@ -67,20 +65,6 @@ public sealed record RepositoryConfig
     public string? Bucket { get; init; }
     public string? Prefix { get; init; }
     public string? Region { get; init; }
-
-    public required string PasswordSecret { get; init; }
-    public string? AccessKeySecret { get; init; }
-    public string? SecretKeySecret { get; init; }
-}
-
-public sealed record ScheduledPolicy
-{
-    public required PolicySpecDto Policy { get; init; }
-
-    /// <summary>Standard 5-field cron expression, evaluated with <see cref="TimeZone"/>.</summary>
-    public required string Cron { get; init; }
-
-    public string TimeZone { get; init; } = "Europe/Rome";
 }
 
 public sealed record RetryConfig
@@ -91,17 +75,20 @@ public sealed record RetryConfig
 
 public static class RepositoryConfigExtensions
 {
-    /// <summary>Builds the restic repository string and the backend environment from config + secrets.</summary>
-    public static RepositoryTarget Resolve(this RepositoryConfig config, ISecretStore secrets, string? resticCacheDir)
+    /// <summary>Builds the restic repository string and the backend environment from config + this job's credentials.</summary>
+    public static RepositoryTarget Resolve(this RepositoryConfig config, JobCredentials credentials, string? resticCacheDir)
     {
         var repository = config.Raw ?? BuildS3Repository(config);
-        var password = secrets.GetRequired(config.PasswordSecret);
+        var password = credentials.RepositoryPassword
+            ?? throw new InvalidOperationException("Job credentials did not include a repository password");
 
         var env = new Dictionary<string, string>();
-        if (config.AccessKeySecret is not null)
-            env["AWS_ACCESS_KEY_ID"] = secrets.GetRequired(config.AccessKeySecret);
-        if (config.SecretKeySecret is not null)
-            env["AWS_SECRET_ACCESS_KEY"] = secrets.GetRequired(config.SecretKeySecret);
+        if (credentials.AccessKeyId is { } accessKeyId)
+            env["AWS_ACCESS_KEY_ID"] = accessKeyId;
+        if (credentials.SecretAccessKey is { } secretAccessKey)
+            env["AWS_SECRET_ACCESS_KEY"] = secretAccessKey;
+        if (credentials.SessionToken is { } sessionToken)
+            env["AWS_SESSION_TOKEN"] = sessionToken;
         if (!string.IsNullOrWhiteSpace(config.Region))
             env["AWS_DEFAULT_REGION"] = config.Region;
         if (!string.IsNullOrEmpty(resticCacheDir))

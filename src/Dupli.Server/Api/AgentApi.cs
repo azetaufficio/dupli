@@ -8,7 +8,6 @@ using Dupli.Server.Configuration;
 using Dupli.Server.Domain.Monitoring;
 using Dupli.Server.Hosting;
 using Dupli.Server.Infrastructure.Database;
-using Dupli.Server.Infrastructure.Security;
 using Dupli.Server.Jobs;
 using Dupli.Server.Tools;
 using Microsoft.Extensions.Options;
@@ -38,7 +37,6 @@ public static class AgentApi
         agent.MapPost("/agents/secret/rotate", (HttpContext http, EnrollmentService enrollment, CancellationToken ct) =>
             enrollment.RotateSecretAsync(http.User.AgentId(), ct));
         agent.MapGet("/agents/{agentId:guid}/jobs", JobsAsync);
-        agent.MapGet("/agents/storage-credentials", StorageCredentialsAsync);
         agent.MapPost("/agents/logs", (AgentLogBatchDto batch, HttpContext http, DupliDbContext db, CancellationToken ct) =>
             StoreLogsAsync(http.User.AgentId(), null, batch, db, ct));
 
@@ -50,6 +48,7 @@ public static class AgentApi
         agent.MapPost("/jobs/{jobId:guid}/failed", ReportAsync);
         agent.MapPost("/jobs/{jobId:guid}/logs", (Guid jobId, AgentLogBatchDto batch, HttpContext http, DupliDbContext db, CancellationToken ct) =>
             StoreLogsAsync(http.User.AgentId(), jobId, batch, db, ct));
+        agent.MapPost("/agents/jobs/{jobId:guid}/credentials", JobCredentialsAsync);
     }
 
     public static string PublicBaseUrl(HttpRequest request, DupliServerOptions options) =>
@@ -118,19 +117,14 @@ public static class AgentApi
     }
 
     /// <summary>
-    /// The current S3 key for the agent's own repository, fetched when the heartbeat reports a
-    /// <see cref="HeartbeatResponse.StorageCredentialsVersion"/> ahead of what the agent has applied.
+    /// Just-in-time credentials for one Running job: repository + whatever PostgreSQL passwords its sources
+    /// reference. Never cached: audit-logged by <see cref="JobCredentialsService"/> (names only, never values).
     /// </summary>
-    private static async Task<IResult> StorageCredentialsAsync(HttpContext http, DupliDbContext db, SecretProtector protector, CancellationToken ct)
+    private static async Task<IResult> JobCredentialsAsync(Guid jobId, HttpContext http, JobCredentialsService credentials, CancellationToken ct)
     {
-        var agent = await db.Agents.FindAsync([http.User.AgentId()], ct) ?? throw ApiException.NotFound("Agent");
+        var response = await credentials.GetAsync(http.User.AgentId(), jobId, ct);
         http.Response.Headers.CacheControl = "no-store";
-        return Results.Ok(new StorageCredentialsResponse
-        {
-            Version = agent.S3CredentialsVersion,
-            AccessKeyId = agent.S3AccessKeyId,
-            SecretAccessKey = protector.Unprotect(agent.S3SecretKeyProtected),
-        });
+        return Results.Ok(response);
     }
 
     private static Task<IReadOnlyList<AgentJobDto>> JobsAsync(Guid agentId, HttpContext http, JobService jobs, CancellationToken ct)

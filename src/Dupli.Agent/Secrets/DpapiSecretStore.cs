@@ -12,9 +12,11 @@ namespace Dupli.Agent.Secrets;
 /// <summary>
 /// Windows (the supported platform): DPAPI (LocalMachine scope) file per secret under
 /// <c>config\secrets\&lt;name&gt;.bin</c>, restricted to SYSTEM+Administrators.
-/// Other OSes (test containers, development): <c>DUPLI_SECRET_&lt;NAME&gt;</c> environment variable first,
-/// then a file readable only by the agent's user (0600 in a 0700 directory). There is no OS key store
-/// there, so the file is protected by permissions only.
+/// Other OSes (test containers, development): for <see cref="SecretNames.AgentSecret"/> only,
+/// <c>DUPLI_SECRET_&lt;NAME&gt;</c> environment variable first, then a file readable only by the agent's
+/// user (0600 in a 0700 directory). There is no OS key store there, so the file is protected by permissions
+/// only. The only secret this store ever persists is the agent secret: every business credential (repository,
+/// PostgreSQL) is fetched per job and never written here.
 /// </summary>
 public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore> logger) : ISecretStore
 {
@@ -23,8 +25,8 @@ public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore>
         ValidateName(name);
         if (!OperatingSystem.IsWindows())
         {
-            var fromEnvironment = Environment.GetEnvironmentVariable($"DUPLI_SECRET_{name.ToUpperInvariant()}");
-            if (fromEnvironment is not null)
+            if (name == SecretNames.AgentSecret
+                && Environment.GetEnvironmentVariable($"DUPLI_SECRET_{name.ToUpperInvariant()}") is { } fromEnvironment)
                 return fromEnvironment;
             var plain = PlainSecretPath(name);
             return File.Exists(plain) ? File.ReadAllText(plain) : null;
@@ -86,6 +88,28 @@ public sealed class DpapiSecretStore(AgentPaths paths, ILogger<DpapiSecretStore>
             writer.Write(value);
         File.Move(temp, file, overwrite: true);
         logger.LogWarning("Secret '{Name}' stored at {Path}, protected by file permissions only (no DPAPI on this OS)", name, file);
+    }
+
+    /// <summary>Removes a secret, if present. Used once at startup to purge everything but <c>agent-secret</c>.</summary>
+    public void Delete(string name)
+    {
+        ValidateName(name);
+        var file = OperatingSystem.IsWindows() ? SecretPath(name) : PlainSecretPath(name);
+        if (File.Exists(file))
+            File.Delete(file);
+    }
+
+    /// <summary>Names of every secret currently stored (not their values).</summary>
+    public IReadOnlyList<string> Names()
+    {
+        if (!Directory.Exists(paths.Secrets))
+            return [];
+        var suffix = OperatingSystem.IsWindows() ? ".bin" : ".secret";
+        return Directory.EnumerateFiles(paths.Secrets, $"*{suffix}")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(n => n is not null)
+            .Select(n => n!)
+            .ToList();
     }
 
     private string SecretPath(string name) => Path.Combine(paths.Secrets, $"{name}.bin");

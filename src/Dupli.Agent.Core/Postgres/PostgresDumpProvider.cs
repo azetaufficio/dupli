@@ -99,7 +99,7 @@ public sealed partial class PostgresDumpProvider(
         }
         catch (NpgsqlException ex)
         {
-            throw PostgresConnection.Map(source, ex);
+            throw PostgresConnection.Map(source, ex, password);
         }
     }
 

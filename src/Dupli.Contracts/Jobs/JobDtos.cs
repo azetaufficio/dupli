@@ -150,3 +150,30 @@ public sealed record JobItemResultDto
     /// <summary>Where the item ended up (restore: target directory or database).</summary>
     public string? Location { get; init; }
 }
+
+/// <summary>
+/// Answer to <c>POST api/agents/jobs/{jobId}/credentials</c>: just-in-time credentials for one Running job,
+/// scoped to what that job type actually needs (see <c>JobCredentialsService</c> server-side). The agent keeps
+/// this only in memory for the duration of the job and never writes it to disk.
+/// </summary>
+public sealed class JobCredentialsResponse
+{
+    public required JobRepositoryCredentialsDto Repository { get; init; }
+
+    /// <summary>PostgreSQL passwords keyed by <c>PasswordSecret</c> name. A source whose secret is not set on
+    /// the server is simply omitted: only that source fails, like today.</summary>
+    public IReadOnlyDictionary<string, string> Postgres { get; init; } = new Dictionary<string, string>();
+
+    public override string ToString() => "JobCredentialsResponse";
+}
+
+/// <summary>The restic repository's password and backend (S3) credentials for one job.</summary>
+public sealed class JobRepositoryCredentialsDto
+{
+    public required string Password { get; init; }
+    public required string AccessKeyId { get; init; }
+    public required string SecretAccessKey { get; init; }
+    public string? SessionToken { get; init; }
+
+    public override string ToString() => "JobRepositoryCredentialsDto";
+}

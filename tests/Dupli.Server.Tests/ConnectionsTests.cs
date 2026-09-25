@@ -28,6 +28,7 @@ public sealed class ConnectionsTests(PostgresFixture postgres) : IAsyncLifetime
         var created = await (await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/connections", Request())).ReadAsync<PgConnectionDto>();
         Assert.Equal("postgres@localhost:5432", created.Name);
         Assert.Equal(agent.Id, created.AgentId);
+        Assert.False(created.PasswordSet); // no password on this request
 
         var fetched = await (await _server.Admin().GetAsync($"/api/admin/connections/{created.Id}")).ReadAsync<PgConnectionDto>();
         Assert.Equal(created.Id, fetched.Id);
@@ -41,6 +42,24 @@ public sealed class ConnectionsTests(PostgresFixture postgres) : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.NoContent, (await _server.Admin().DeleteAsync($"/api/admin/connections/{created.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await _server.Admin().GetAsync($"/api/admin/connections/{created.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Password_is_write_only_and_reported_only_as_a_boolean()
+    {
+        var agent = await _server.CreateAgentAsync();
+        var created = await (await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/connections",
+            Request() with { Password = "s3kr3t" })).ReadAsync<PgConnectionDto>();
+        Assert.True(created.PasswordSet);
+
+        var raw = await (await _server.Admin().GetAsync($"/api/admin/agents/{agent.Id}/connections")).Content.ReadAsStringAsync();
+        Assert.DoesNotContain("s3kr3t", raw);
+
+        // Updating without a password keeps the one already escrowed.
+        var updated = await (await _server.Admin().PutJsonAsync($"/api/admin/connections/{created.Id}", Request() with { Host = "db.internal" }))
+            .ReadAsync<PgConnectionDto>();
+        Assert.True(updated.PasswordSet);
+        Assert.Equal("db.internal", updated.Host);
     }
 
     [Fact]

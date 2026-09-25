@@ -64,7 +64,6 @@ public sealed class PolicyRunner(
     IBackupEngine engine,
     IDatabaseBackupProvider databases,
     IFileSnapshotProvider snapshots,
-    ISecretStore secrets,
     RetryOptions retry,
     TimeProvider time,
     ILogger<PolicyRunner> logger)
@@ -90,6 +89,7 @@ public sealed class PolicyRunner(
         PolicySpecDto policy,
         RepositoryTarget repository,
         string host,
+        ISecretStore secrets,
         CancellationToken cancellationToken)
     {
         using var _ = logger.BeginScope(new Dictionary<string, object> { ["PolicyId"] = policy.PolicyId });
@@ -129,7 +129,7 @@ public sealed class PolicyRunner(
                     break;
 
                 case PostgresSourceDto pg:
-                    items.AddRange(await BackupPostgresAsync(pg, repository, host, baseTags, cancellationToken));
+                    items.AddRange(await BackupPostgresAsync(pg, repository, host, baseTags, secrets, cancellationToken));
                     break;
             }
         }
@@ -145,6 +145,7 @@ public sealed class PolicyRunner(
         RepositoryTarget repository,
         string host,
         string[] baseTags,
+        ISecretStore secrets,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<DatabaseDump> dumps;

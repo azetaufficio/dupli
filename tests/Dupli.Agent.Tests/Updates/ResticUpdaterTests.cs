@@ -1,5 +1,4 @@
 using Dupli.Agent.Configuration;
-using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Errors;
 using Dupli.Agent.Core.Tools;
 using Dupli.Agent.Tests.Infrastructure;
@@ -9,6 +8,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Dupli.Agent.Tests.Updates;
 
+/// <summary>
+/// <see cref="ResticUpdater"/> only installs (sha256 + <c>restic version</c>, both inside
+/// <see cref="IToolManager.EnsureInstalledAsync"/>) and swaps the manifest: there is no repository probe.
+/// </summary>
 public sealed class ResticUpdaterTests : IDisposable
 {
     private static readonly ToolManifestDto Old = new() { Version = "0.18.1", DownloadUrl = "https://x/old", Sha256 = new string('a', 64) };
@@ -18,8 +21,6 @@ public sealed class ResticUpdaterTests : IDisposable
     private readonly AgentPaths _paths;
     private readonly ActiveResticManifest _active = new(Old);
     private readonly FakeTools _tools = new();
-    private Exception? _probeError;
-    private int _probes;
 
     public ResticUpdaterTests()
     {
@@ -29,12 +30,10 @@ public sealed class ResticUpdaterTests : IDisposable
 
     public void Dispose() => _dir.Dispose();
 
-    private ResticUpdater CreateUpdater() => new(
-        _active, _tools, _ => new ProbeEngine(this), new RepositoryTarget("s3:https://s3.test/bucket/vm", "pw"),
-        _paths, TimeProvider.System, NullLoggerFactory.Instance);
+    private ResticUpdater CreateUpdater() => new(_active, _tools, _paths, TimeProvider.System, NullLoggerFactory.Instance);
 
     [Fact]
-    public async Task Activates_after_a_successful_probe_and_persists_the_manifest()
+    public async Task Activates_after_a_successful_install_and_persists_the_manifest()
     {
         Directory.CreateDirectory(Path.Combine(_paths.ResticTools, "0.17.0"));
         Directory.CreateDirectory(Path.Combine(_paths.ResticTools, Old.Version));
@@ -50,18 +49,18 @@ public sealed class ResticUpdaterTests : IDisposable
     }
 
     [Fact]
-    public async Task Transient_probe_failure_keeps_the_old_binary_and_backs_off()
+    public async Task Transient_install_failure_keeps_the_old_binary_and_backs_off()
     {
-        _probeError = BackupException.Transient("S3 unreachable");
+        _tools.Error = BackupException.Transient("download failed");
         var updater = CreateUpdater();
 
         await updater.TryActivateAsync(New, CancellationToken.None);
         await updater.TryActivateAsync(New, CancellationToken.None);
 
         Assert.Equal(Old, _active.Current);
-        Assert.Contains("S3 unreachable", updater.LastError);
+        Assert.Contains("download failed", updater.LastError);
         Assert.Null(ResticUpdater.LoadPersisted(_paths));
-        Assert.Equal(1, _probes);
+        Assert.Equal(1, _tools.Calls); // backed off, not retried immediately
     }
 
     [Fact]
@@ -99,23 +98,5 @@ public sealed class ResticUpdaterTests : IDisposable
             Calls++;
             return Error is null ? Task.FromResult("/tools/restic/" + manifest.Version + "/restic") : Task.FromException<string>(Error);
         }
-    }
-
-    private sealed class ProbeEngine(ResticUpdaterTests test) : IBackupEngine
-    {
-        public Task EnsureRepositoryAsync(RepositoryTarget repository, CancellationToken cancellationToken)
-        {
-            test._probes++;
-            return test._probeError is null ? Task.CompletedTask : Task.FromException(test._probeError);
-        }
-
-        public Task<BackupResult> BackupAsync(BackupRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<IReadOnlyList<SnapshotInfo>> ListSnapshotsAsync(RepositoryTarget repository, IReadOnlyList<string> tags, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<IReadOnlyList<SnapshotFile>> ListFilesAsync(RepositoryTarget repository, string snapshotId, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<IReadOnlyList<SnapshotNode>> ListDirectoryAsync(RepositoryTarget repository, string snapshotId, string directory, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task RestoreAsync(RestoreRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task ForgetAsync(ForgetRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task<CheckResult> CheckAsync(RepositoryTarget repository, int readDataSubsetPercent, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task UnlockStaleAsync(RepositoryTarget repository, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

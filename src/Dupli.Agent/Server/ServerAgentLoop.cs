@@ -20,7 +20,6 @@ public sealed class ServerAgentLoop(
     JobExecutor executor,
     AgentConfig config,
     AgentPaths paths,
-    ISecretStore secrets,
     TimeProvider time,
     IAgentRestarter restarter,
     ILogger<ServerAgentLoop> logger,
@@ -29,7 +28,6 @@ public sealed class ServerAgentLoop(
     private HeartbeatResponse? _desired;
     private TimeSpan _pollInterval = TimeSpan.FromSeconds(Math.Max(5, config.Server?.PollIntervalSeconds ?? 30));
     private bool _recovered;
-    private int _storageCredentialsVersion = StorageCredentialsStateFile.Read(paths);
 
     /// <summary>How often a running job renews its lease and checks for cancellation.</summary>
     public TimeSpan LeaseRenewalInterval { get; init; } = TimeSpan.FromSeconds(60);
@@ -151,34 +149,10 @@ public sealed class ServerAgentLoop(
             LastBackupAt = ledger.LastSuccessfulBackupAt(),
             RunningJobs = ledger.RunningJobIds(),
             FreeDiskSpace = FreeDiskSpace(),
-            StorageCredentialsVersion = _storageCredentialsVersion,
         };
         var response = await server.HeartbeatAsync(updates?.Describe(request) ?? request, ct);
         _desired = response;
         _pollInterval = TimeSpan.FromSeconds(Math.Max(5, response.PollIntervalSeconds));
-
-        // Not gated on being idle: a job already running keeps the old key (it captured its own RepositoryTarget
-        // at the start), the next one picks up whatever secrets.Set below just wrote.
-        if (response.StorageCredentialsVersion > _storageCredentialsVersion)
-            await ApplyStorageCredentialsAsync(ct);
-    }
-
-    private async Task ApplyStorageCredentialsAsync(CancellationToken ct)
-    {
-        try
-        {
-            var credentials = await server.GetStorageCredentialsAsync(ct);
-            secrets.Set(SecretNames.S3AccessKey, credentials.AccessKeyId);
-            secrets.Set(SecretNames.S3SecretKey, credentials.SecretAccessKey);
-            await StorageCredentialsStateFile.WriteAsync(paths, credentials.Version, ct);
-            _storageCredentialsVersion = credentials.Version;
-            logger.LogInformation("Applied storage credentials version {Version}", credentials.Version);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // Retried on the next heartbeat: the server still reports the higher desired version until then.
-            logger.LogWarning(ex, "Could not fetch the new storage credentials; will retry");
-        }
     }
 
     private async Task RunJobAsync(AgentJobDto job, CancellationToken stoppingToken)
@@ -196,21 +170,29 @@ public sealed class ServerAgentLoop(
         }
         else
         {
-            using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            using var renewCts = new CancellationTokenSource();
-            var renewal = RenewLeaseAsync(job.JobId, jobCts, renewCts.Token);
-            try
+            using var credentials = await FetchCredentialsAsync(job, startedAt, stoppingToken);
+            if (credentials.Failure is { } failure)
             {
-                result = await executor.ExecuteAsync(job, jobCts.Token);
+                result = failure;
             }
-            finally
+            else
             {
-                await renewCts.CancelAsync();
-                await renewal;
-            }
+                using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                using var renewCts = new CancellationTokenSource();
+                var renewal = RenewLeaseAsync(job.JobId, jobCts, renewCts.Token);
+                try
+                {
+                    result = await executor.ExecuteAsync(job, credentials.Value, jobCts.Token);
+                }
+                finally
+                {
+                    await renewCts.CancelAsync();
+                    await renewal;
+                }
 
-            // Service stopping mid-job: leave it Running in the ledger, it is reported as interrupted at restart.
-            stoppingToken.ThrowIfCancellationRequested();
+                // Service stopping mid-job: leave it Running in the ledger, it is reported as interrupted at restart.
+                stoppingToken.ThrowIfCancellationRequested();
+            }
         }
 
         ledger.MarkFinished(job.JobId, result);
@@ -231,6 +213,38 @@ public sealed class ServerAgentLoop(
             logger.LogWarning("Restart requested by the server (job {JobId})", job.JobId);
             restarter.Restart();
         }
+    }
+
+    /// <summary>Every job but <see cref="RestartAgentJobPayload"/> needs credentials for the duration of the run;
+    /// a fetch failure fails the job instead of executing it (Transient when the server itself is unreachable).</summary>
+    private async Task<CredentialsOrFailure> FetchCredentialsAsync(AgentJobDto job, DateTimeOffset startedAt, CancellationToken ct)
+    {
+        if (job.Payload is RestartAgentJobPayload)
+            return new CredentialsOrFailure(null, null);
+
+        try
+        {
+            var response = await server.GetJobCredentialsAsync(job.JobId, ct);
+            return new CredentialsOrFailure(new JobCredentials(response), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Could not fetch credentials for job {JobId}", job.JobId);
+            var failure = new JobResultDto
+            {
+                Outcome = JobOutcome.Failed,
+                StartedAt = startedAt,
+                CompletedAt = time.GetUtcNow(),
+                Error = $"Could not fetch job credentials: {ex.Message}",
+                ErrorKind = IsServerUnavailable(ex) ? "Transient" : "Permanent",
+            };
+            return new CredentialsOrFailure(null, failure);
+        }
+    }
+
+    private sealed record CredentialsOrFailure(JobCredentials? Value, JobResultDto? Failure) : IDisposable
+    {
+        public void Dispose() => Value?.Dispose();
     }
 
     private async Task RenewLeaseAsync(string jobId, CancellationTokenSource job, CancellationToken stop)

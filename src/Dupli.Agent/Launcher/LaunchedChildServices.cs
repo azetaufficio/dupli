@@ -52,15 +52,3 @@ public sealed class LauncherHealthReporter(VersionFiles files, TimeProvider time
         }
     }
 }
-
-/// <summary>Local (M1) mode: healthy once the host is up, there is no server cycle to wait for.</summary>
-public sealed class StartupHealthService(IAgentHealthReporter health) : IHostedService
-{
-    public Task StartAsync(CancellationToken cancellationToken)
-    {
-        health.ReportHealthy();
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-}

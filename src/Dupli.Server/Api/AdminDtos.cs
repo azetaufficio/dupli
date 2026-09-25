@@ -139,10 +139,16 @@ public sealed record PgConnectionRequest
     public int Port { get; init; } = 5432;
     public required string Username { get; init; }
 
-    /// <summary>Name of the secret holding the password in the agent's local secret store, not the password.</summary>
+    /// <summary>Name the password is escrowed under (<c>agent_secret</c>) and the key the agent later fetches
+    /// it by; not the password itself.</summary>
     public required string PasswordSecret { get; init; }
 
     public string? BinDirectory { get; init; }
+
+    /// <summary>Write-only: when set, replaces the escrowed password. Never returned by any endpoint.</summary>
+    public string? Password { get; init; }
+
+    public override string ToString() => $"PgConnectionRequest({Name})";
 }
 
 public sealed record PgConnectionDto(
@@ -155,7 +161,11 @@ public sealed record PgConnectionDto(
     string PasswordSecret,
     string? BinDirectory,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+
+    /// <summary>Whether a password is currently escrowed under <see cref="PasswordSecret"/>. The value itself
+    /// is never part of this DTO.</summary>
+    bool PasswordSet);
 
 public sealed record RunSystemJobRequest(JobType Type);
 

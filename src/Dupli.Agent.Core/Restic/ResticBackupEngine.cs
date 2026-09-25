@@ -263,6 +263,11 @@ public sealed class ResticBackupEngine(
             throw ResticErrors.FromExitCode("unlock", result.ExitCode, result.StderrTail);
     }
 
+    // Values of these environment variables never appear in a BackupException, in case restic (or the command
+    // it streams from, e.g. pg_dump) ever echoes one back on stderr.
+    private static readonly string[] SecretEnvKeys =
+        ["RESTIC_PASSWORD", "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SESSION_TOKEN", "PGPASSWORD"];
+
     private async Task<ProcessResult> RunAsync(
         RepositoryTarget repository,
         IReadOnlyList<string> args,
@@ -282,10 +287,13 @@ public sealed class ResticBackupEngine(
                 env[k] = v;
 
         var exe = await binary.GetPathAsync(cancellationToken);
-        return await runner.RunAsync(
+        var result = await runner.RunAsync(
             new ProcessSpec { FileName = exe, Arguments = args, Environment = env },
             onStdout,
             cancellationToken);
+
+        var secrets = SecretEnvKeys.Where(env.ContainsKey).Select(k => env[k]);
+        return result with { StderrTail = SecretRedaction.Redact(result.StderrTail, secrets) };
     }
 
     private static bool TryParse(string line, out JsonDocument doc)

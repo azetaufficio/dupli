@@ -2,6 +2,7 @@ using Dupli.Agent.Cli;
 using Dupli.Agent.Configuration;
 using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Errors;
+using Dupli.Agent.Core.Secrets;
 using Dupli.Agent.Restore;
 using Dupli.Contracts.Jobs;
 using Microsoft.Extensions.Logging;
@@ -16,21 +17,22 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
 {
     private const int MaxErrorLength = 4000;
 
-    public async Task<JobResultDto> ExecuteAsync(AgentJobDto job, CancellationToken cancellationToken)
+    /// <summary>
+    /// <paramref name="credentials"/> is null only for <see cref="RestartAgentJobPayload"/>, the one job type
+    /// that needs no repository: <see cref="ServerAgentLoop"/> does not fetch credentials for it.
+    /// </summary>
+    public async Task<JobResultDto> ExecuteAsync(AgentJobDto job, JobCredentials? credentials, CancellationToken cancellationToken)
     {
         var startedAt = time.GetUtcNow();
-        // Re-resolved every job (not the fixed one built at startup): a storage credentials rotation applied
-        // between jobs must take effect on the very next one, without waiting for the agent to restart.
-        var repository = runtime.Config.Repository.Resolve(runtime.Secrets, runtime.Config.ResticCacheDir ?? runtime.Paths.Cache);
         try
         {
             return job.Payload switch
             {
-                BackupJobPayload backup => await BackupAsync(backup, repository, cancellationToken),
-                RetentionJobPayload retention => await RetentionAsync(retention, repository, startedAt, cancellationToken),
-                RepositoryCheckJobPayload check => await CheckAsync(check, repository, startedAt, cancellationToken),
-                RestoreTestJobPayload restoreTest => await RestoreTestAsync(job.JobId, restoreTest, repository, startedAt, cancellationToken),
-                RestoreJobPayload restore => await RestoreAsync(job.JobId, restore, repository, startedAt, cancellationToken),
+                BackupJobPayload backup => await BackupAsync(backup, Repository(credentials), credentials!, cancellationToken),
+                RetentionJobPayload retention => await RetentionAsync(retention, Repository(credentials), startedAt, cancellationToken),
+                RepositoryCheckJobPayload check => await CheckAsync(check, Repository(credentials), startedAt, cancellationToken),
+                RestoreTestJobPayload restoreTest => await RestoreTestAsync(job.JobId, restoreTest, Repository(credentials), startedAt, cancellationToken),
+                RestoreJobPayload restore => await RestoreAsync(job.JobId, restore, Repository(credentials), credentials!, startedAt, cancellationToken),
                 // The restart itself happens after the result is recorded (see ServerAgentLoop).
                 RestartAgentJobPayload => new JobResultDto { Outcome = JobOutcome.Succeeded, StartedAt = startedAt, CompletedAt = time.GetUtcNow() },
                 _ => Failed(startedAt, $"Job type {job.Type} is not supported by this agent version", ErrorKind.Permanent),
@@ -53,10 +55,10 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         }
     }
 
-    private async Task<JobResultDto> BackupAsync(BackupJobPayload payload, RepositoryTarget repository, CancellationToken ct)
+    private async Task<JobResultDto> BackupAsync(BackupJobPayload payload, RepositoryTarget repository, ISecretStore credentials, CancellationToken ct)
     {
         ledger.SavePolicy(payload.Policy, time.GetUtcNow());
-        var result = await runtime.PolicyRunner.RunAsync(payload.Policy, repository, runtime.Config.Host, ct);
+        var result = await runtime.PolicyRunner.RunAsync(payload.Policy, repository, runtime.Config.Host, credentials, ct);
         var failed = result.Items.FirstOrDefault(i => i.Status == RunStatus.Failed);
 
         return new JobResultDto
@@ -138,7 +140,8 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         };
     }
 
-    private async Task<JobResultDto> RestoreAsync(string jobId, RestoreJobPayload payload, RepositoryTarget repository, DateTimeOffset startedAt, CancellationToken ct)
+    private async Task<JobResultDto> RestoreAsync(
+        string jobId, RestoreJobPayload payload, RepositoryTarget repository, ISecretStore credentials, DateTimeOffset startedAt, CancellationToken ct)
     {
         // Policies from the server plus the ones cached here: a stale server view must not open a hole in the guard.
         var policies = payload.Policies.Concat(ledger.KnownPolicies()).ToList();
@@ -157,7 +160,7 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
         if (payload.Postgres is { } pg)
         {
             var dump = Path.Combine(target, pg.Database + ".dump");
-            var password = runtime.Secrets.GetRequired(pg.Source.PasswordSecret);
+            var password = credentials.GetRequired(pg.Source.PasswordSecret);
             var warnings = await runtime.PostgresRestorer.RestoreAsync(pg.Source, password, dump, pg.NewDatabase, ct);
             items.Add(new JobItemResultDto
             {
@@ -178,6 +181,10 @@ public sealed class JobExecutor(AgentRuntime runtime, JobLedger ledger, TimeProv
             Items = items,
         };
     }
+
+    private RepositoryTarget Repository(JobCredentials? credentials) => runtime.Config.Repository.Resolve(
+        credentials ?? throw new InvalidOperationException("This job type requires credentials"),
+        runtime.Config.ResticCacheDir ?? runtime.Paths.Cache);
 
     private JobResultDto Failed(DateTimeOffset startedAt, string error, ErrorKind kind) => new()
     {

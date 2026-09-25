@@ -55,6 +55,8 @@ interface ConnectionForm {
   username: string;
   passwordSecret: string;
   binDirectory: string;
+  /** Write-only, always starts empty (even when editing): left blank, the escrowed password is unchanged. */
+  password: string;
 }
 
 interface CredentialsForm {
@@ -71,6 +73,7 @@ function emptyConnectionForm(): ConnectionForm {
     username: 'postgres',
     passwordSecret: '',
     binDirectory: '',
+    password: '',
   };
 }
 
@@ -490,13 +493,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                   <label class="field">
                     Password secret name
                     <input name="connSecret" [(ngModel)]="connectionForm.passwordSecret" required />
-                    <span class="hint"
-                      >Not the password: the name of the secret stored on the VM with
-                      <code
-                        >dupli-agent secret set
-                        {{ connectionForm.passwordSecret || '&lt;name&gt;' }}</code
-                      >.</span
-                    >
+                    <span class="hint">Key the password below is escrowed under on the server.</span>
                   </label>
                   <label class="field">
                     pg_dump directory
@@ -506,6 +503,28 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                       [(ngModel)]="connectionForm.binDirectory"
                       placeholder="C:\\Program Files\\PostgreSQL\\18\\bin"
                     />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="field">
+                    Password
+                    @if (editingConnectionId()) {
+                      <app-badge
+                        [value]="editingConnectionPasswordSet() ? 'Active' : 'Disabled'"
+                        [text]="editingConnectionPasswordSet() ? 'Set' : 'Missing'"
+                      />
+                    }
+                    <input
+                      type="password"
+                      name="connPassword"
+                      autocomplete="new-password"
+                      [(ngModel)]="connectionForm.password"
+                    />
+                    <span class="hint">{{
+                      editingConnectionId()
+                        ? 'Write-only: leave empty to keep the current password.'
+                        : 'Write-only: never shown again once saved.'
+                    }}</span>
                   </label>
                 </div>
                 @if (connectionError()) {
@@ -545,6 +564,7 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                       <th>Port</th>
                       <th>Username</th>
                       <th>Password secret</th>
+                      <th>Password</th>
                       <th>pg_dump dir</th>
                       <th></th>
                     </tr>
@@ -557,6 +577,12 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                         <td class="mono">{{ c.port }}</td>
                         <td class="mono">{{ c.username }}</td>
                         <td class="mono">{{ c.passwordSecret }}</td>
+                        <td>
+                          <app-badge
+                            [value]="c.passwordSet ? 'Active' : 'Disabled'"
+                            [text]="c.passwordSet ? 'Set' : 'Missing'"
+                          />
+                        </td>
                         <td class="mono">{{ c.binDirectory ?? '—' }}</td>
                         <td class="num">
                           @if (auth.canOperate()) {
@@ -902,6 +928,7 @@ export class AgentDetailPage {
 
   protected connectionForm: ConnectionForm = emptyConnectionForm();
   protected readonly editingConnectionId = signal<string | null>(null);
+  protected readonly editingConnectionPasswordSet = signal(false);
   protected readonly savingConnection = signal(false);
   protected readonly connectionError = signal<string | null>(null);
 
@@ -1153,6 +1180,7 @@ export class AgentDetailPage {
 
   protected editConnection(c: PgConnection): void {
     this.editingConnectionId.set(c.id);
+    this.editingConnectionPasswordSet.set(c.passwordSet);
     this.connectionError.set(null);
     this.connectionForm = {
       name: c.name,
@@ -1161,11 +1189,13 @@ export class AgentDetailPage {
       username: c.username,
       passwordSecret: c.passwordSecret,
       binDirectory: c.binDirectory ?? '',
+      password: '',
     };
   }
 
   protected cancelEditConnection(): void {
     this.editingConnectionId.set(null);
+    this.editingConnectionPasswordSet.set(false);
     this.connectionError.set(null);
     this.connectionForm = emptyConnectionForm();
   }
@@ -1178,6 +1208,7 @@ export class AgentDetailPage {
       username: this.connectionForm.username.trim(),
       passwordSecret: this.connectionForm.passwordSecret.trim(),
       binDirectory: this.connectionForm.binDirectory.trim() || null,
+      ...(this.connectionForm.password.trim() ? { password: this.connectionForm.password.trim() } : {}),
     };
     const context = new HttpContext().set(SILENT_ERRORS, true);
     const id = this.editingConnectionId();

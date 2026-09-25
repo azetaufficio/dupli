@@ -237,6 +237,8 @@ export interface PgConnection {
   binDirectory: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Whether a password is currently escrowed under `passwordSecret`. The value itself is never returned. */
+  passwordSet: boolean;
 }
 
 export interface PgConnectionRequest {
@@ -246,6 +248,8 @@ export interface PgConnectionRequest {
   username: string;
   passwordSecret: string;
   binDirectory: string | null;
+  /** Write-only: set to replace the escrowed password. Omit to leave it unchanged. */
+  password?: string;
 }
 
 export interface PolicyRequest {

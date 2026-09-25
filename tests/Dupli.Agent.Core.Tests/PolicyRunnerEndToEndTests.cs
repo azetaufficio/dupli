@@ -120,9 +120,9 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
             });
 
         var engine = restic.CreateEngine();
-        var runner = CreateRunner(engine, new MemorySecrets { ["pg-password"] = PgPassword });
+        var runner = CreateRunner(engine);
 
-        var result = await runner.RunAsync(policy, repo, "vm-001", default);
+        var result = await runner.RunAsync(policy, repo, "vm-001", new MemorySecrets { ["pg-password"] = PgPassword }, default);
 
         // Broken source fails permanently, everything else succeeds independently.
         Assert.Equal(RunStatus.Failed, result.Status);
@@ -206,8 +206,8 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
         var repo = new RepositoryTarget(_tmp.Combine("repo"), "repo-password",
             new Dictionary<string, string> { ["RESTIC_CACHE_DIR"] = _tmp.Combine("cache") });
 
-        var result = await CreateRunner(restic.CreateEngine(), new MemorySecrets { ["pg-password"] = "nope" })
-            .RunAsync(policy, repo, "vm-001", default);
+        var result = await CreateRunner(restic.CreateEngine())
+            .RunAsync(policy, repo, "vm-001", new MemorySecrets { ["pg-password"] = "nope" }, default);
 
         var item = Assert.Single(result.Items);
         Assert.Equal(RunStatus.Failed, item.Status);
@@ -237,23 +237,23 @@ public sealed class PolicyRunnerEndToEndTests(ResticFixture restic) : IAsyncLife
         };
         var repo = new RepositoryTarget(_tmp.Combine("repo-only"), "repo-password",
             new Dictionary<string, string> { ["RESTIC_CACHE_DIR"] = _tmp.Combine("cache") });
-        var runner = CreateRunner(restic.CreateEngine(), new MemorySecrets { ["pg-password"] = PgPassword });
+        var runner = CreateRunner(restic.CreateEngine());
+        var secrets = new MemorySecrets { ["pg-password"] = PgPassword };
 
-        var result = await runner.RunAsync(Policy("postgres", "skipped"), repo, "vm-001", default);
+        var result = await runner.RunAsync(Policy("postgres", "skipped"), repo, "vm-001", secrets, default);
         Assert.Equal(RunStatus.Succeeded, result.Status);
         Assert.Equal(new[] { "postgres", "skipped" }, result.Items.Select(i => i.Item).Order().ToArray());
 
-        var missing = Assert.Single((await runner.RunAsync(Policy("app_one", "nope"), repo, "vm-001", default)).Items);
+        var missing = Assert.Single((await runner.RunAsync(Policy("app_one", "nope"), repo, "vm-001", secrets, default)).Items);
         Assert.Equal(RunStatus.Failed, missing.Status);
         Assert.Equal(ErrorKind.Permanent, missing.ErrorKind);
         Assert.Contains("nope", missing.Error);
     }
 
-    private PolicyRunner CreateRunner(IBackupEngine engine, ISecretStore secrets) => new(
+    private PolicyRunner CreateRunner(IBackupEngine engine) => new(
         engine,
         new PostgresDumpProvider(new StaticPostgresBinLocator([]), restic.Runner, NullLogger<PostgresDumpProvider>.Instance),
         new DirectFileSnapshotProvider(),
-        secrets,
         new RetryOptions(MaxRetries: 1, BaseDelay: TimeSpan.FromMilliseconds(100)),
         TimeProvider.System,
         NullLogger<PolicyRunner>.Instance);

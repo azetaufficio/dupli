@@ -1,9 +1,6 @@
 using System.Text.Json;
 using Dupli.Agent.Configuration;
-using Dupli.Agent.Core.Backup;
 using Dupli.Agent.Core.Errors;
-using Dupli.Agent.Core.Processes;
-using Dupli.Agent.Core.Restic;
 using Dupli.Agent.Core.Tools;
 using Dupli.Contracts.Tools;
 using Microsoft.Extensions.Logging;
@@ -11,28 +8,18 @@ using Microsoft.Extensions.Logging;
 namespace Dupli.Agent.Updates;
 
 /// <summary>
-/// Activates the restic release desired by the server: install (sha256 + <c>restic version</c>), probe the repository
-/// with the new binary, then persist <c>config\restic.json</c> and swap <see cref="ActiveResticManifest"/>. The old
-/// binary stays in use until the probe passes; current + previous releases are kept on disk.
+/// Activates the restic release desired by the server: install (sha256 + <c>restic version</c>, both inside
+/// <see cref="IToolManager.EnsureInstalledAsync"/>), then persist <c>config\restic.json</c> and swap
+/// <see cref="ActiveResticManifest"/>. No repository probe: the old binary stays in use until the install
+/// succeeds; current + previous releases are kept on disk.
 /// </summary>
 public sealed class ResticUpdater(
     ActiveResticManifest active,
     IToolManager tools,
-    Func<string, IBackupEngine> engineForBinary,
-    RepositoryTarget repository,
     AgentPaths paths,
     TimeProvider time,
     ILoggerFactory loggerFactory)
 {
-    public ResticUpdater(
-        ActiveResticManifest active, IToolManager tools, RepositoryTarget repository, AgentPaths paths,
-        IProcessRunner runner, TimeProvider time, ILoggerFactory loggerFactory)
-        : this(active, tools,
-            exe => new ResticBackupEngine(new FixedResticBinaryProvider(exe), runner, loggerFactory.CreateLogger<ResticBackupEngine>()),
-            repository, paths, time, loggerFactory)
-    {
-    }
-
     private static readonly TimeSpan RetryAfterTransient = TimeSpan.FromMinutes(15);
 
     private readonly ILogger _logger = loggerFactory.CreateLogger<ResticUpdater>();
@@ -72,8 +59,7 @@ public sealed class ResticUpdater(
         var previous = active.Current;
         try
         {
-            var exe = await tools.EnsureInstalledAsync(desired, ct);
-            await engineForBinary(exe).EnsureRepositoryAsync(repository, ct);
+            await tools.EnsureInstalledAsync(desired, ct);
 
             var temp = paths.ResticStateFile + ".tmp";
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(desired, AgentConfigLoader.JsonOptions), ct);

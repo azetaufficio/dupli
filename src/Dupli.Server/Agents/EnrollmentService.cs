@@ -14,7 +14,6 @@ namespace Dupli.Server.Agents;
 /// <summary>Enrollment token exchange, agent authentication and secret rotation.</summary>
 public sealed class EnrollmentService(
     DupliDbContext db,
-    SecretProtector protector,
     AgentTokenIssuer tokens,
     ReleaseMirror mirror,
     IOptions<DupliServerOptions> options,
@@ -92,10 +91,6 @@ public sealed class EnrollmentService(
                 Prefix = agent.StoragePrefix,
                 Region = storage.Region,
             },
-            RepositoryPassword = protector.Unprotect(agent.RepositoryPasswordProtected),
-            S3AccessKeyId = agent.S3AccessKeyId,
-            S3SecretAccessKey = protector.Unprotect(agent.S3SecretKeyProtected),
-            S3CredentialsVersion = agent.S3CredentialsVersion,
             ResticManifest = manifest,
             PollIntervalSeconds = options.Value.Agents.PollIntervalSeconds,
         };

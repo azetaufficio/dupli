@@ -68,10 +68,13 @@ bootstrap() {
 
     sources='[{"type": "directory", "sourceId": "sample", "paths": ["'"$SAMPLE_DIR"'"]}]'
     if [ -n "${PG_HOST:-}" ]; then
-        printf %s "$PG_PASSWORD" | dupli-agent secret set pg-sample
-        sources=$(echo "$sources" | jq --arg h "$PG_HOST" --argjson p "${PG_PORT:-5432}" --arg u "${PG_USER:-postgres}" --arg b "$PG_BIN" \
-            '. + [{type: "postgres", sourceId: "pg", host: $h, port: $p, username: $u, passwordSecret: "pg-sample",
-                   excludeDatabases: ["dupli"], binDirectory: $b}]')
+        # The password is escrowed server-side (agent_secret) and handed to the agent per job: it is never set
+        # on the VM (no "dupli-agent secret set" any more).
+        connection=$(api POST "/agents/$agent/connections" -d "$(jq -n --arg h "$PG_HOST" --argjson p "${PG_PORT:-5432}" \
+            --arg u "${PG_USER:-postgres}" --arg b "$PG_BIN" --arg pw "$PG_PASSWORD" \
+            '{name: "pg-sample", host: $h, port: $p, username: $u, passwordSecret: "pg-sample", binDirectory: $b, password: $pw}')" | jq -r .id)
+        sources=$(echo "$sources" | jq --arg c "$connection" \
+            '. + [{type: "postgres", sourceId: "pg", connectionId: $c, excludeDatabases: ["dupli"]}]')
     fi
 
     if [ "$(api GET "/agents/$agent/policies" | jq length)" = "0" ]; then

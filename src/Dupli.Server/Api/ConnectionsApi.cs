@@ -5,6 +5,7 @@ using Dupli.Server.Auth;
 using Dupli.Server.Domain.Agents;
 using Dupli.Server.Domain.Policies;
 using Dupli.Server.Infrastructure.Database;
+using Dupli.Server.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace Dupli.Server.Api;
@@ -12,7 +13,7 @@ namespace Dupli.Server.Api;
 /// <summary>Agent-level PostgreSQL connections, referenced by postgres policy sources via <c>connectionId</c>.</summary>
 public static partial class ConnectionsApi
 {
-    // Matches the agent secret store's file-name-safe charset (dupli-agent secret set <name>).
+    // Same charset the escrow table's secret names use.
     [GeneratedRegex("^[A-Za-z0-9_-]+$")]
     private static partial Regex SecretNamePattern();
 
@@ -25,10 +26,16 @@ public static partial class ConnectionsApi
         admin.MapDelete("/connections/{id:guid}", DeleteAsync).RequireAuthorization(AuthConstants.OperatorPolicy);
     }
 
-    private static async Task<IEnumerable<PgConnectionDto>> ListAsync(Guid id, DupliDbContext db, CancellationToken ct) =>
-        (await db.PgConnections.AsNoTracking().Where(c => c.AgentId == id).OrderBy(c => c.Name).ToListAsync(ct)).Select(ToDto);
+    private static async Task<IEnumerable<PgConnectionDto>> ListAsync(Guid id, DupliDbContext db, CancellationToken ct)
+    {
+        var connections = await db.PgConnections.AsNoTracking().Where(c => c.AgentId == id).OrderBy(c => c.Name).ToListAsync(ct);
+        var secretNames = (await db.AgentSecrets.AsNoTracking().Where(s => s.AgentId == id).Select(s => s.Name).ToListAsync(ct))
+            .ToHashSet(StringComparer.Ordinal);
+        return connections.Select(c => ToDto(c, secretNames.Contains(c.PasswordSecret)));
+    }
 
-    private static async Task<IResult> CreateAsync(Guid id, PgConnectionRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
+    private static async Task<IResult> CreateAsync(
+        Guid id, PgConnectionRequest request, DupliDbContext db, SecretProtector protector, TimeProvider time, CancellationToken ct)
     {
         Validate(request);
         if (!await db.Agents.AnyAsync(a => a.Id == id, ct))
@@ -50,13 +57,22 @@ public static partial class ConnectionsApi
         };
         db.PgConnections.Add(connection);
         await AdminApi.SaveOrConflictAsync(db, "A connection with this name already exists for the agent", ct);
-        return Results.Created($"/api/admin/connections/{connection.Id}", ToDto(connection));
+
+        if (!string.IsNullOrEmpty(request.Password))
+            await SetPasswordAsync(db, id, connection.PasswordSecret, request.Password, protector, time, ct);
+        var passwordSet = await PasswordSetAsync(db, id, connection.PasswordSecret, ct);
+        return Results.Created($"/api/admin/connections/{connection.Id}", ToDto(connection, passwordSet));
     }
 
-    private static async Task<PgConnectionDto> GetAsync(Guid id, DupliDbContext db, CancellationToken ct) =>
-        ToDto(await db.PgConnections.AsNoTracking().SingleOrDefaultAsync(c => c.Id == id, ct) ?? throw ApiException.NotFound("Connection"));
+    private static async Task<PgConnectionDto> GetAsync(Guid id, DupliDbContext db, CancellationToken ct)
+    {
+        var connection = await db.PgConnections.AsNoTracking().SingleOrDefaultAsync(c => c.Id == id, ct) ?? throw ApiException.NotFound("Connection");
+        var passwordSet = await PasswordSetAsync(db, connection.AgentId, connection.PasswordSecret, ct);
+        return ToDto(connection, passwordSet);
+    }
 
-    private static async Task<PgConnectionDto> UpdateAsync(Guid id, PgConnectionRequest request, DupliDbContext db, TimeProvider time, CancellationToken ct)
+    private static async Task<PgConnectionDto> UpdateAsync(
+        Guid id, PgConnectionRequest request, DupliDbContext db, SecretProtector protector, TimeProvider time, CancellationToken ct)
     {
         Validate(request);
         var connection = await db.PgConnections.SingleOrDefaultAsync(c => c.Id == id, ct) ?? throw ApiException.NotFound("Connection");
@@ -68,7 +84,11 @@ public static partial class ConnectionsApi
         connection.BinDirectory = string.IsNullOrWhiteSpace(request.BinDirectory) ? null : request.BinDirectory.Trim();
         connection.UpdatedAt = time.GetUtcNow();
         await AdminApi.SaveOrConflictAsync(db, "A connection with this name already exists for the agent", ct);
-        return ToDto(connection);
+
+        if (!string.IsNullOrEmpty(request.Password))
+            await SetPasswordAsync(db, connection.AgentId, connection.PasswordSecret, request.Password, protector, time, ct);
+        var passwordSet = await PasswordSetAsync(db, connection.AgentId, connection.PasswordSecret, ct);
+        return ToDto(connection, passwordSet);
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, DupliDbContext db, CancellationToken ct)
@@ -106,6 +126,25 @@ public static partial class ConnectionsApi
             throw ApiException.BadRequest("Password secret name must be letters, digits, '_' or '-'");
     }
 
-    private static PgConnectionDto ToDto(PgConnection c) =>
-        new(c.Id, c.AgentId, c.Name, c.Host, c.Port, c.Username, c.PasswordSecret, c.BinDirectory, c.CreatedAt, c.UpdatedAt);
+    /// <summary>Upserts the escrowed password (composite key, no native EF Core upsert).</summary>
+    private static async Task SetPasswordAsync(
+        DupliDbContext db, Guid agentId, string name, string password, SecretProtector protector, TimeProvider time, CancellationToken ct)
+    {
+        var existing = await db.AgentSecrets.SingleOrDefaultAsync(s => s.AgentId == agentId && s.Name == name, ct);
+        var now = time.GetUtcNow();
+        if (existing is null)
+            db.AgentSecrets.Add(new AgentSecret { AgentId = agentId, Name = name, ValueProtected = protector.Protect(password), UpdatedAt = now });
+        else
+        {
+            existing.ValueProtected = protector.Protect(password);
+            existing.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static Task<bool> PasswordSetAsync(DupliDbContext db, Guid agentId, string name, CancellationToken ct) =>
+        db.AgentSecrets.AsNoTracking().AnyAsync(s => s.AgentId == agentId && s.Name == name, ct);
+
+    private static PgConnectionDto ToDto(PgConnection c, bool passwordSet) =>
+        new(c.Id, c.AgentId, c.Name, c.Host, c.Port, c.Username, c.PasswordSecret, c.BinDirectory, c.CreatedAt, c.UpdatedAt, passwordSet);
 }

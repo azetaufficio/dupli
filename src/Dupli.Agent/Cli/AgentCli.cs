@@ -22,12 +22,6 @@ public static class AgentCli
         root.Subcommands.Add(RunCommand());
         root.Subcommands.Add(LaunchCommand());
         root.Subcommands.Add(VersionCommand());
-        root.Subcommands.Add(BackupCommand());
-        root.Subcommands.Add(SnapshotsCommand());
-        root.Subcommands.Add(RestoreCommand());
-        root.Subcommands.Add(ForgetCommand());
-        root.Subcommands.Add(CheckCommand());
-        root.Subcommands.Add(SecretCommand());
         root.Subcommands.Add(RotateSecretCommand());
         root.Subcommands.Add(InstallCommand());
         root.Subcommands.Add(UninstallCommand());
@@ -37,11 +31,9 @@ public static class AgentCli
 
     private static AgentPaths Paths(ParseResult parseResult) => new(parseResult.GetValue(HomeOption));
 
-    private static Option<string> PolicyOption() => new("--policy") { Description = "Policy name or id.", Required = true };
-
     private static Command RunCommand()
     {
-        var command = new Command("run", "Runs the agent service loop (server polling, or local policies when not enrolled).");
+        var command = new Command("run", "Runs the agent service loop. The agent must be enrolled with a server: there is no standalone mode.");
         command.SetAction((parseResult, ct) => AgentServiceHost.RunAsync(Paths(parseResult), ct));
         return command;
     }
@@ -62,81 +54,6 @@ public static class AgentCli
             return 0;
         });
         return command;
-    }
-
-    private static Command BackupCommand()
-    {
-        var policy = PolicyOption();
-
-        var command = new Command("backup", "Runs a single policy once.") { policy };
-        command.SetAction((parseResult, ct) =>
-            Commands.BackupAsync(Paths(parseResult), parseResult.GetRequiredValue(policy), ct));
-        return command;
-    }
-
-    private static Command SnapshotsCommand()
-    {
-        var tag = new Option<string[]>("--tag") { Description = "Filter by tag (repeatable)." };
-
-        var command = new Command("snapshots", "Lists snapshots in the repository.") { tag };
-        command.SetAction((parseResult, ct) =>
-            Commands.SnapshotsAsync(Paths(parseResult), parseResult.GetValue(tag) ?? [], ct));
-        return command;
-    }
-
-    private static Command RestoreCommand()
-    {
-        var snapshot = new Option<string>("--snapshot") { Description = "Snapshot id.", Required = true };
-        var target = new Option<string?>("--target") { Description = "Restore target directory (defaults to C:\\DupliRestore\\<snapshot-id>)." };
-        var include = new Option<string[]>("--include") { Description = "Restrict restore to this path (repeatable)." };
-
-        var command = new Command("restore", "Restores a snapshot to an alternative location. Never overwrites a configured source path.")
-        {
-            snapshot, target, include,
-        };
-        command.SetAction((parseResult, ct) => Commands.RestoreAsync(
-            Paths(parseResult),
-            parseResult.GetRequiredValue(snapshot),
-            parseResult.GetValue(target),
-            parseResult.GetValue(include) ?? [],
-            ct));
-        return command;
-    }
-
-    private static Command ForgetCommand()
-    {
-        var policy = PolicyOption();
-        var prune = new Option<bool>("--prune") { Description = "Also prune unreferenced data (slower, frees space)." };
-
-        var command = new Command("forget", "Applies retention for a policy.") { policy, prune };
-        command.SetAction((parseResult, ct) => Commands.ForgetAsync(
-            Paths(parseResult), parseResult.GetRequiredValue(policy), parseResult.GetValue(prune), ct));
-        return command;
-    }
-
-    private static Command CheckCommand()
-    {
-        var subset = new Option<int>("--subset")
-        {
-            Description = "Percentage of data to read-verify (0 = structure only).",
-            DefaultValueFactory = _ => 0,
-        };
-
-        var command = new Command("check", "Verifies repository integrity.") { subset };
-        command.SetAction((parseResult, ct) =>
-            Commands.CheckAsync(Paths(parseResult), parseResult.GetValue(subset), ct));
-        return command;
-    }
-
-    private static Command SecretCommand()
-    {
-        var name = new Argument<string>("name") { Description = "Secret name. Value is read from stdin, never from an argument." };
-
-        var set = new Command("set", "Stores a secret (value read from stdin).") { name };
-        set.SetAction((parseResult, ct) =>
-            Commands.SecretSetAsync(Paths(parseResult), parseResult.GetRequiredValue(name), ct));
-
-        return new Command("secret", "Manages local secrets (DPAPI-protected).") { set };
     }
 
     private static Command RotateSecretCommand()
