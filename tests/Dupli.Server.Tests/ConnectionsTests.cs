@@ -18,7 +18,6 @@ public sealed class ConnectionsTests(PostgresFixture postgres) : IAsyncLifetime
         Host = "localhost",
         Port = 5432,
         Username = "postgres",
-        PasswordSecret = "pg-main",
     };
 
     [Fact]
@@ -72,11 +71,10 @@ public sealed class ConnectionsTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("", "localhost", 5432, "postgres", "pg-main")]
-    [InlineData("name", "localhost", 0, "postgres", "pg-main")]
-    [InlineData("name", "localhost", 5432, "", "pg-main")]
-    [InlineData("name", "localhost", 5432, "postgres", "bad secret name")]
-    public async Task Invalid_connection_is_rejected(string name, string host, int port, string username, string passwordSecret)
+    [InlineData("", "localhost", 5432, "postgres")]
+    [InlineData("name", "localhost", 0, "postgres")]
+    [InlineData("name", "localhost", 5432, "")]
+    public async Task Invalid_connection_is_rejected(string name, string host, int port, string username)
     {
         var agent = await _server.CreateAgentAsync();
         var response = await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.Id}/connections", new PgConnectionRequest
@@ -85,7 +83,6 @@ public sealed class ConnectionsTests(PostgresFixture postgres) : IAsyncLifetime
             Host = host,
             Port = port,
             Username = username,
-            PasswordSecret = passwordSecret,
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

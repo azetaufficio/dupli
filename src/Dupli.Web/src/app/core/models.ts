@@ -246,7 +246,6 @@ export interface PgConnectionRequest {
   host: string;
   port: number;
   username: string;
-  passwordSecret: string;
   binDirectory: string | null;
   /** Write-only: set to replace the escrowed password. Omit to leave it unchanged. */
   password?: string;

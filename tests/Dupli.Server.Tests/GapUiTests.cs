@@ -74,7 +74,7 @@ public sealed class GapUiTests(PostgresFixture postgres) : IAsyncLifetime
         var policy = await CreatePolicyAsync(agent.AgentId, "p1");
         var connection = await (await _server.Admin().PostJsonAsync($"/api/admin/agents/{agent.AgentId}/connections", new PgConnectionRequest
         {
-            Name = "pg", Host = "localhost", Port = 5432, Username = "postgres", PasswordSecret = "pg-main",
+            Name = "pg", Host = "localhost", Port = 5432, Username = "postgres",
         })).ReadAsync<PgConnectionDto>();
 
         var job = await (await _server.Admin().PostAsync($"/api/admin/policies/{policy.Id}/run", null)).ReadAsync<JobDto>();

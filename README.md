@@ -1,8 +1,22 @@
 # Dupli
 
-Central control plane for backing up Windows VMs (folders and PostgreSQL databases) to S3-compatible storage, built on [restic](https://restic.net) and .NET 10.
+Dupli is a centralized control plane for backing up Windows VMs — folders and PostgreSQL databases — to S3-compatible storage, built on [restic](https://restic.net) and .NET 10.
 
-> **Status:** early development. Milestones M1 (agent), M2 (management API), M3 (web UI) and M4 (remote updates with rollback) are implemented; not yet validated on production Windows VMs. See `docs/plan-m1-m3.md` and `docs/plan-m4.md`.
+> **Status:** in production. Milestones M1–M5 (agent, management API, web UI, remote updates with rollback, credentials/notifications/UI gaps) are implemented and running: server deployed on Azure Container Apps, agents enrolled on Windows VMs, backup and restore (files and PostgreSQL) verified end to end.
+
+## Why Dupli
+
+Most teams running a handful of Windows VMs with PostgreSQL databases end up stitching backups together from scheduled tasks, ad-hoc scripts and a cron job somewhere calling `pg_dump`. The commercial alternatives (Veeam, Acronis, …) are closed-source, licensed per agent, and overkill for "back up these folders and databases to my own S3 bucket, alert me if something breaks." We couldn't find a comparable **fully open source** option that combined a central console, scheduled policies, S3-agnostic storage and remote agent management — so we built one.
+
+## What it does
+
+- **Central console**: register agents, define backup policies (folders and/or PostgreSQL instances), and see status, history and logs from one web UI.
+- **Backup engine**: [restic](https://restic.net) under the hood — deduplicated, encrypted, incremental snapshots. Folders are backed up directly; PostgreSQL databases are dumped and streamed straight into restic (no temporary files), with per-database and per-cluster ("globals") dumps discovered automatically.
+- **Any S3-compatible storage**: Wasabi, Backblaze B2, AWS S3, self-hosted RustFS/MinIO — one restic repository per VM.
+- **Restore**: browse snapshots and restore folders or databases from the web UI.
+- **Remote agent management**: agents enroll with a one-time token, poll the server for jobs, and can be updated remotely (server-driven version rollout with automatic rollback if the new version doesn't come up healthy).
+- **Alerting & notifications**: e-mail (SMTP or Microsoft Graph/Office 365) and in-app notifications, configurable per operator and per alert type (failed backups, offline agents, outdated agents, failed updates…).
+- **Access control**: operators sign in with Microsoft Entra ID; roles are Owner, Operator and Viewer.
 
 ## Components
 
@@ -41,6 +55,8 @@ Updates: the server tells each agent, in the heartbeat response, which agent and
 cp deploy/.env.example deploy/.env      # host, Postgres password, Entra ID app registration, SMTP
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
+
+See [`docs/deploy-docker-compose.md`](docs/deploy-docker-compose.md) for a full walkthrough (prerequisites, TLS, backing up the stack itself), or [`docs/deploy-azure-container-apps.md`](docs/deploy-azure-container-apps.md) for a managed deployment on Azure Container Apps.
 
 The image builds the web UI and the server; Caddy terminates TLS. Operators sign in with Microsoft Entra ID (`Dupli:Auth`, in every environment). Who may sign in is the operator user table, managed from the **Users** page by an `Owner` (roles: `Owner`, `Operator`, `Viewer`). While the table is empty only `Dupli:Auth:BootstrapOwnerEmail` can sign in, and becomes the first owner; the server refuses to start in EntraId mode when neither exists. The admin API also accepts an `X-Dupli-Admin-Key` header for automation when `Dupli:Admin:ApiKey` is set; the same key opens the `/admin` break-glass page (15-minute session, user management only).
 

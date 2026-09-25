@@ -139,10 +139,6 @@ public sealed record PgConnectionRequest
     public int Port { get; init; } = 5432;
     public required string Username { get; init; }
 
-    /// <summary>Name the password is escrowed under (<c>agent_secret</c>) and the key the agent later fetches
-    /// it by; not the password itself.</summary>
-    public required string PasswordSecret { get; init; }
-
     public string? BinDirectory { get; init; }
 
     /// <summary>Write-only: when set, replaces the escrowed password. Never returned by any endpoint.</summary>

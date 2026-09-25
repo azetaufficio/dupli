@@ -53,7 +53,6 @@ interface ConnectionForm {
   host: string;
   port: number;
   username: string;
-  passwordSecret: string;
   binDirectory: string;
   /** Write-only, always starts empty (even when editing): left blank, the escrowed password is unchanged. */
   password: string;
@@ -71,7 +70,6 @@ function emptyConnectionForm(): ConnectionForm {
     host: 'localhost',
     port: 5432,
     username: 'postgres',
-    passwordSecret: '',
     binDirectory: '',
     password: '',
   };
@@ -491,11 +489,6 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                     >Username <input name="connUser" [(ngModel)]="connectionForm.username" required
                   /></label>
                   <label class="field">
-                    Password secret name
-                    <input name="connSecret" [(ngModel)]="connectionForm.passwordSecret" required />
-                    <span class="hint">Key the password below is escrowed under on the server.</span>
-                  </label>
-                  <label class="field">
                     pg_dump directory
                     <span class="hint">Optional. Auto-detected from the registry when empty.</span>
                     <input
@@ -563,7 +556,6 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                       <th>Host</th>
                       <th>Port</th>
                       <th>Username</th>
-                      <th>Password secret</th>
                       <th>Password</th>
                       <th>pg_dump dir</th>
                       <th></th>
@@ -576,7 +568,6 @@ const SYSTEM_JOBS: Record<SystemJobType, { label: string; confirm: string }> = {
                         <td class="mono">{{ c.host }}</td>
                         <td class="mono">{{ c.port }}</td>
                         <td class="mono">{{ c.username }}</td>
-                        <td class="mono">{{ c.passwordSecret }}</td>
                         <td>
                           <app-badge
                             [value]="c.passwordSet ? 'Active' : 'Disabled'"
@@ -1187,7 +1178,6 @@ export class AgentDetailPage {
       host: c.host,
       port: c.port,
       username: c.username,
-      passwordSecret: c.passwordSecret,
       binDirectory: c.binDirectory ?? '',
       password: '',
     };
@@ -1206,7 +1196,6 @@ export class AgentDetailPage {
       host: this.connectionForm.host.trim(),
       port: Number(this.connectionForm.port),
       username: this.connectionForm.username.trim(),
-      passwordSecret: this.connectionForm.passwordSecret.trim(),
       binDirectory: this.connectionForm.binDirectory.trim() || null,
       ...(this.connectionForm.password.trim() ? { password: this.connectionForm.password.trim() } : {}),
     };

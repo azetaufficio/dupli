@@ -390,7 +390,6 @@ public sealed class AgentServerEndToEndTests : IAsyncLifetime
             Host = cs.Host!,
             Port = cs.Port,
             Username = cs.Username!,
-            PasswordSecret = "pg-it",
             BinDirectory = PgBin,
             Password = "s3kr3t-pg",
         }, DupliJson.Options));

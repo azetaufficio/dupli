@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Dupli.Contracts;
 using Dupli.Server.Auth;
 using Dupli.Server.Domain.Agents;
@@ -11,12 +10,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Dupli.Server.Api;
 
 /// <summary>Agent-level PostgreSQL connections, referenced by postgres policy sources via <c>connectionId</c>.</summary>
-public static partial class ConnectionsApi
+public static class ConnectionsApi
 {
-    // Same charset the escrow table's secret names use.
-    [GeneratedRegex("^[A-Za-z0-9_-]+$")]
-    private static partial Regex SecretNamePattern();
-
     public static void MapConnectionsApi(this RouteGroupBuilder admin)
     {
         admin.MapGet("/agents/{id:guid}/connections", ListAsync);
@@ -50,7 +45,9 @@ public static partial class ConnectionsApi
             Host = request.Host.Trim(),
             Port = request.Port,
             Username = request.Username.Trim(),
-            PasswordSecret = request.PasswordSecret.Trim(),
+            // An internal escrow key, never user-facing. Its own id, independent from the connection's,
+            // so a connection could later escrow more than one named secret (e.g. a TLS client key).
+            PasswordSecret = Guid.NewGuid().ToString("N"),
             BinDirectory = string.IsNullOrWhiteSpace(request.BinDirectory) ? null : request.BinDirectory.Trim(),
             CreatedAt = now,
             UpdatedAt = now,
@@ -80,7 +77,6 @@ public static partial class ConnectionsApi
         connection.Host = request.Host.Trim();
         connection.Port = request.Port;
         connection.Username = request.Username.Trim();
-        connection.PasswordSecret = request.PasswordSecret.Trim();
         connection.BinDirectory = string.IsNullOrWhiteSpace(request.BinDirectory) ? null : request.BinDirectory.Trim();
         connection.UpdatedAt = time.GetUtcNow();
         await AdminApi.SaveOrConflictAsync(db, "A connection with this name already exists for the agent", ct);
@@ -122,8 +118,6 @@ public static partial class ConnectionsApi
             throw ApiException.BadRequest("Invalid port");
         if (string.IsNullOrWhiteSpace(request.Username))
             throw ApiException.BadRequest("Username is required");
-        if (string.IsNullOrWhiteSpace(request.PasswordSecret) || !SecretNamePattern().IsMatch(request.PasswordSecret))
-            throw ApiException.BadRequest("Password secret name must be letters, digits, '_' or '-'");
     }
 
     /// <summary>Upserts the escrowed password (composite key, no native EF Core upsert).</summary>

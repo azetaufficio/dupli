@@ -37,7 +37,6 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
             Host = "localhost",
             Port = 5432,
             Username = "postgres",
-            PasswordSecret = "pg-main",
         })).ReadAsync<PgConnectionDto>();
 
     private async Task<PolicyDto> CreatePolicyAsync(Guid agentId, PolicyRequest? request = null)
@@ -69,7 +68,8 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
     public async Task Run_now_is_assigned_once_executed_and_recorded()
     {
         var agent = await _server.EnrollAsync();
-        var policy = await CreatePolicyAsync(agent.AgentId);
+        var connection = await CreateConnectionAsync(agent.AgentId);
+        var policy = await CreatePolicyAsync(agent.AgentId, Policy(connection.Id));
         var job = await (await _server.Admin().PostAsync($"/api/admin/policies/{policy.Id}/run", null)).ReadAsync<JobDto>();
 
         var polled = Assert.Single(await PollAsync(agent));
@@ -78,7 +78,7 @@ public sealed class JobFlowTests(PostgresFixture postgres) : IAsyncLifetime
         Assert.Equal(policy.Id.ToString(), payload.Policy.PolicyId);
         Assert.Equal(2, payload.Policy.Sources.Count);
         var pg = Assert.IsType<PostgresSourceDto>(payload.Policy.Sources.Single(s => s.SourceId == "pg"));
-        Assert.Equal("pg-main", pg.PasswordSecret);
+        Assert.Equal(connection.PasswordSecret, pg.PasswordSecret);
         Assert.Equal(["scratch"], pg.ExcludeDatabases);
 
         // Lost response: the same job is delivered again, nothing new is assigned.

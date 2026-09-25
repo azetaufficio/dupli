@@ -29,7 +29,6 @@ public sealed class JobCredentialsTests(PostgresFixture postgres) : IAsyncLifeti
             Host = "localhost",
             Port = 5432,
             Username = "postgres",
-            PasswordSecret = "pg-main",
             Password = password,
         })).ReadAsync<PgConnectionDto>();
 
@@ -66,7 +65,7 @@ public sealed class JobCredentialsTests(PostgresFixture postgres) : IAsyncLifeti
         Assert.Equal("AK-vm-backup", credentials.Repository.AccessKeyId);
         Assert.Equal("SK-vm-backup", credentials.Repository.SecretAccessKey);
         Assert.Equal("s3kr3t-pg", Assert.Single(credentials.Postgres).Value);
-        Assert.Equal("pg-main", Assert.Single(credentials.Postgres).Key);
+        Assert.Equal(connection.PasswordSecret, Assert.Single(credentials.Postgres).Key);
     }
 
     [Fact]

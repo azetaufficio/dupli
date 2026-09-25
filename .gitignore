@@ -6,6 +6,10 @@
 # dotenv files
 .env
 
+# Local-only planning/handoff notes (kept on disk, not published)
+.claude/plans/
+.claude/handoffs/
+
 # User-specific files
 *.rsuser
 *.suo
